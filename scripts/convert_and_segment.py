@@ -265,7 +265,7 @@ def main():
     datetime_str = datetime.now().strftime("%Y%m%d_%H%M%S")
     frame_ms_str = str(args.frame_ms).replace('.', '_')
     overlap_str = f"{args.overlap:.2f}".replace('.', '_')
-    channels_str = f"{args.channels[0]}_{args.channels[1]}_{args.channels[2]}_{args.channels[3]}"
+    channels_str = '_'.join(args.channels)
     target_root = args.output_dir / f"segmented_ms_{frame_ms_str}_o_{overlap_str}_c_{channels_str}_{datetime_str}"
     
     logger.info(f"Input directory: {args.input_dir}")
