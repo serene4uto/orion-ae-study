@@ -2,14 +2,18 @@
 """
 Build a dataset of AE frames from raw .mat files.
 
-The dataset is built by segmenting the raw .mat files into frames of a fixed duration,
-and then saving the frames as .npy files.
+Each .mat file is a 1-second chunk from a continuous recorded stream at a specific load.
+The dataset is built by:
+1. Loading each 1-second chunk (.mat file)
+2. Segmenting each chunk into frames of a fixed duration
+3. Saving all frames from a chunk as a single .npy file
+
 The metadata is saved as a .csv file and a .json file.
 
 The dataset is saved in the following structure:
 - data/raw/segmented/
   - data/
-    - file_id.npy
+    - file_id.npy  (contains all frames from one 1-second chunk)
     - file_id.npy
     - ...
   - metadata.csv
@@ -28,6 +32,7 @@ import numpy as np
 from tqdm import tqdm
 
 SAMPLING_FREQUENCY_HZ = 5e6  # 5 MHz
+MAX_FRAME_DURATION_MS = 1000.0  # 1000 ms
 
 PROJECT_ROOT = Path(__file__).parent.parent.resolve()
 logging.basicConfig(
@@ -37,9 +42,30 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
+def extract_timestamp_for_sorting(filename: str) -> str:
+    """
+    Extract timestamp string from filename for sorting purposes.
+    Format: salves_out_XXcNm_Y_Fs5MHz_Tf1s_YYYY-MM-DD-HH-MM-SS_1.mat
+    Returns: YYYY-MM-DD-HH-MM-SS (as string for chronological sorting)
+    """
+    parts = filename.split('_')
+    return parts[-2]  # YYYY-MM-DD-HH-MM-SS
+
+
 def get_measurement_files(input_dir: Path) -> list[Path]:
-    """Get all measurement files from the source directory."""
-    return sorted(list(input_dir.glob("measurementSeries_*/*/*.mat")))
+    """
+    Get all measurement files from the source directory, sorted chronologically.
+    Each .mat file is a 1-second chunk from a continuous stream, so we sort by timestamp.
+    """
+    files = list(input_dir.glob("measurementSeries_*/*/*.mat"))
+    # Sort by (series, load, timestamp) to ensure chronological order within each (series, load) group
+    def sort_key(path: Path) -> tuple:
+        series = path.parent.parent.name.split('_')[-1]
+        load = path.parent.name
+        timestamp_str = extract_timestamp_for_sorting(path.name)
+        return (series, load, timestamp_str)
+    
+    return sorted(files, key=sort_key)
 
 
 def ms_to_samples(ms: float, fs_hz: float) -> int:
@@ -104,7 +130,7 @@ def parse_args():
         '--frame-ms',
         type=float,
         default=10.0,
-        help='Frame duration in milliseconds (default: 10.0 ms)'
+        help='Frame duration in milliseconds (default: 10.0 ms) with maximum value of 1000 ms'
     )
     parser.add_argument(
         '--overlap',
@@ -163,8 +189,9 @@ def convert_and_segment_dataset(
     # List to store metadata
     metadata = []
     
-    # Counter for trials within each (series, load_class) combination
-    series_trial_counter = {}  # (series, load_class) -> trial_count
+    # Counter for sequential chunks within each (series, load_class) combination
+    # Each .mat file is a 1-second chunk from a continuous stream, numbered sequentially
+    series_chunk_counter = {}  # (series, load_class) -> chunk_number
     
     # Get all measurement files
     data_files = get_measurement_files(source_root)
@@ -202,11 +229,12 @@ def convert_and_segment_dataset(
             segmented_data = segment_stream(signal, frame_length, overlap)
             num_frames = segmented_data.shape[0]
             
-            # Create unique file ID: count trials within this (series, load_class) combination
+            # Create unique file ID: number chunks sequentially within this (series, load_class) combination
+            # Files are already sorted chronologically by get_measurement_files()
             key = (series_name, load_class)
-            series_trial_counter[key] = series_trial_counter.get(key, 0) + 1
-            trial_num_in_series = series_trial_counter[key]
-            file_id = f"{series_name}_{load_str.replace('cNm', '')}_{trial_num_in_series:03d}"
+            series_chunk_counter[key] = series_chunk_counter.get(key, 0) + 1
+            chunk_num = series_chunk_counter[key]
+            file_id = f"{series_name}_{load_str.replace('cNm', '')}_{chunk_num:03d}"
             npy_path = target_root / "data" / f"{file_id}.npy"
             
             # Save all frames from this .mat file as single .npy
@@ -281,10 +309,14 @@ def main():
     logger.info(f"Frame duration: {args.frame_ms} ms")
     logger.info(f"Overlap ratio: {args.overlap}")
     logger.info(f"Channels: {args.channels}")
+
+    if args.frame_ms > MAX_FRAME_DURATION_MS:
+        logger.error(f"Frame duration is greater than maximum value of {MAX_FRAME_DURATION_MS} ms")
+        raise ValueError(f"Frame duration is greater than maximum value of {MAX_FRAME_DURATION_MS} ms")
     
     if not args.input_dir.exists():
         logger.error(f"Input directory does not exist: {args.input_dir}")
-        return
+        raise FileNotFoundError(f"Input directory does not exist: {args.input_dir}")
     
     convert_and_segment_dataset(
         source_root=args.input_dir,
