@@ -10,4 +10,4 @@ __pycache__/
 *.pyzwz
 *.pyzwzw
 
-data/
+/data/

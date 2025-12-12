@@ -1,13 +1,19 @@
-# scripts/convert_and_segment.py
+# scripts/build_frame_dataset.py
 """
-Convert raw .mat files to segmented .npy files with a single frame duration.
+Build a dataset of AE frames from raw .mat files.
 
-Each .mat file is converted and segmented into frames, then saved as a single .npy file.
-Output structure:
-  data/raw/segmented/metadata.csv
-  data/raw/segmented/B_05_0000.npy    (shape: num_frames, frame_length, num_channels)
-  data/raw/segmented/B_05_0001.npy
-  ...
+The dataset is built by segmenting the raw .mat files into frames of a fixed duration,
+and then saving the frames as .npy files.
+The metadata is saved as a .csv file and a .json file.
+
+The dataset is saved in the following structure:
+- data/raw/segmented/
+  - data/
+    - file_id.npy
+    - file_id.npy
+    - ...
+  - metadata.csv
+  - dataset_info.json
 """
 
 from pathlib import Path
@@ -49,7 +55,11 @@ def extract_timestamp(filename: str) -> str:
     """
     parts = filename.split('_')
     timestamp_str = '_'.join(parts[-4:-1])  # YYYY-MM-DD-HH-MM-SS
-    return timestamp_str.replace('-', ':', 2)  # -> YYYY-MM-DD HH:MM:SS
+    # Split by dashes: ['YYYY', 'MM', 'DD', 'HH', 'MM', 'SS']
+    timestamp_parts = timestamp_str.split('-')
+    date_part = '-'.join(timestamp_parts[:3])  # YYYY-MM-DD
+    time_part = ':'.join(timestamp_parts[3:])  # HH:MM:SS
+    return f"{date_part} {time_part}"
 
 
 def segment_stream(stream_data: np.ndarray, frame_length: int, overlap: float) -> np.ndarray:
@@ -153,6 +163,9 @@ def convert_and_segment_dataset(
     # List to store metadata
     metadata = []
     
+    # Counter for trials within each (series, load_class) combination
+    series_trial_counter = {}  # (series, load_class) -> trial_count
+    
     # Get all measurement files
     data_files = get_measurement_files(source_root)
     logger.info(f"Found {len(data_files)} measurement files")
@@ -189,27 +202,24 @@ def convert_and_segment_dataset(
             segmented_data = segment_stream(signal, frame_length, overlap)
             num_frames = segmented_data.shape[0]
             
-            # Create unique file ID
-            trial_num = len([m for m in metadata if m['series'] == series_name and m['load_class'] == load_class]) + 1
-            file_id = f"{series_name}_{load_str.replace('cNm', '')}_{trial_num:03d}"
+            # Create unique file ID: count trials within this (series, load_class) combination
+            key = (series_name, load_class)
+            series_trial_counter[key] = series_trial_counter.get(key, 0) + 1
+            trial_num_in_series = series_trial_counter[key]
+            file_id = f"{series_name}_{load_str.replace('cNm', '')}_{trial_num_in_series:03d}"
             npy_path = target_root / "data" / f"{file_id}.npy"
             
             # Save all frames from this .mat file as single .npy
             np.save(npy_path, segmented_data)
             
-            # Append metadata
+            # Append metadata (only file-specific fields, dataset-level fields go to dataset_info.json)
             metadata.append({
                 "file_id": file_id,
-                "file_path": str(npy_path),
+                "file_path": str(npy_path.relative_to(target_root)),
                 "series": series_name,
                 "load_class": load_class,
                 "load_val": load_val,
                 "num_frames": num_frames,
-                "frame_length_samples": frame_length,
-                "num_channels": len(channels),
-                "channel_names": ",".join(channels),
-                "frame_duration_ms": frame_ms,
-                "overlap_ratio": overlap,
                 "timestamp": timestamp,
                 "original_file": mat_path.name
             })
@@ -244,10 +254,7 @@ def convert_and_segment_dataset(
         "num_files": len(df),
         "series": sorted(df['series'].unique().tolist()),
         "loads": {
-            int(k): float(v) for k, v in zip(
-                sorted(df['load_class'].unique()),
-                df.groupby('load_class')['load_val'].first().values
-            )
+            load_class: load_val for load_str, (load_class, load_val) in load_map.items()
         }
     }
     

@@ -2,3 +2,5 @@ scipy
 numpy
 pandas
 tqdm
+
+torch
