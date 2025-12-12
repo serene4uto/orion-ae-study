@@ -54,7 +54,7 @@ def extract_timestamp(filename: str) -> str:
     Output: YYYY-MM-DD HH:MM:SS
     """
     parts = filename.split('_')
-    timestamp_str = '_'.join(parts[-4:-1])  # YYYY-MM-DD-HH-MM-SS
+    timestamp_str = parts[-2]  # YYYY-MM-DD-HH-MM-SS (second to last part before .mat)
     # Split by dashes: ['YYYY', 'MM', 'DD', 'HH', 'MM', 'SS']
     timestamp_parts = timestamp_str.split('-')
     date_part = '-'.join(timestamp_parts[:3])  # YYYY-MM-DD
