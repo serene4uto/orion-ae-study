@@ -10,32 +10,32 @@ class OrionAEFrameDataset(Dataset):
 
     def __init__(
         self,
-        data_path: Path,
-        config_path: Path,
+        data_path: str,
+        config_path: str,
         type: str = 'train', # 'train', 'val', 'test'
 
     ):
-        self.data_path = data_path
+        # Convert to Path objects if strings are passed
         self.type = type
         self.num_frames = 0
 
-        # # check if metadata.csv exists
-        # if not (self.data_path / 'metadata.csv').exists():
-        #     raise FileNotFoundError(f"Metadata file not found at {self.data_path / 'metadata.csv'}")
+        # check if metadata.csv exists
+        if not (Path(data_path) / 'metadata.csv').exists():
+            raise FileNotFoundError(f"Metadata file not found at {data_path / 'metadata.csv'}")
 
-        # # check if config file exists
-        # if not (config_path).exists():
-        #     raise FileNotFoundError(f'Config file not found at {config_path}'
+        # check if config file exists
+        if not Path(config_path).exists():
+            raise FileNotFoundError(f'Config file not found at {config_path}')
 
         # load config
-        with open(config_path, 'r') as f:
+        with open(Path(config_path), 'r') as f:
             self.config = yaml.safe_load(f)
 
         self.load_val_label_map = self.config['labels']
 
         # load metadata
         metadata = self._filter_metadata(
-            pd.read_csv(Path(self.data_path) / 'metadata.csv'), 
+            pd.read_csv(Path(data_path) / 'metadata.csv'), 
             self.type, 
             self.config
         )
@@ -133,4 +133,14 @@ class OrionAEFrameDataset(Dataset):
         sample_item = {}
 
         # locate file index where the frame is located 
+
+        return sample_item
         
+    def _locate_file_index(self, index: int) -> int:
+        """
+        Locates the file index where the frame is located.
+        """
+        for file_index, file_frame_offset in enumerate(self.file_frame_offsets):
+            if index < file_frame_offset:
+                return file_index
+        return len(self.file_frame_offsets) - 1
