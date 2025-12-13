@@ -245,6 +245,7 @@ def convert_and_segment_dataset(
                 "file_id": file_id,
                 "file_path": str(npy_path.relative_to(target_root)),
                 "series": series_name,
+                "chunk": chunk_num,
                 "load_class": load_class,
                 "load_val": load_val,
                 "num_frames": num_frames,

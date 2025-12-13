@@ -1,0 +1,44 @@
+# note:
+# 5 series, 7 loads experiments per serie, 10 1-sec chunks for each load experiment per session
+
+name: "example_1"
+splits: 
+  train_val:
+    type: chunk-based # chunk-based or serie-based
+    train: [0,1,2,3,4,5,6,7]
+    val: [8,9]
+  test: ['F'] # always serie-based split
+channels: ["A", "B", "C", "D"] # define selectedchannels here based on channel names
+labels: 
+  # define labels here based on load values
+  # the idea is that can create different set of labels with different load combinations
+  # for example:
+  # set 3 classes:
+  # class 0: 0.05, 0.1, 0.2
+  # class 1: 0.3, 0.4, 0.5
+  # class 2: 0.6
+  # set 7 classes:
+  # class 0: 0.05, 
+  # class 1: 0.1, 
+  # class 2: 0.2, 
+  # class 3: 0.3, 
+  # class 4: 0.4, 
+  # class 5: 0.5, 
+  # class 6: 0.6, 
+  "lv0": [0.05]
+  "lv1": [0.1]
+  "lv2": [0.2]
+  "lv3": [0.3]
+  "lv4": [0.4]
+  "lv5": [0.5]
+  "lv6": [0.6]
+
+preprocessing:
+  filters: []
+  norms: []
+  
+features: []
+
+  
+  
+
