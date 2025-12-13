@@ -5,3 +5,5 @@ tqdm
 
 torch
 pyyaml
+
+matplotlib

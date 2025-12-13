@@ -13,29 +13,30 @@ class OrionAEFrameDataset(Dataset):
         data_path: str,
         config_path: str,
         type: str = 'train', # 'train', 'val', 'test'
-
     ):
         # Convert to Path objects if strings are passed
+        self.data_path = Path(data_path)
+        config_path = Path(config_path)
         self.type = type
         self.num_frames = 0
 
         # check if metadata.csv exists
-        if not (Path(data_path) / 'metadata.csv').exists():
-            raise FileNotFoundError(f"Metadata file not found at {data_path / 'metadata.csv'}")
+        if not (self.data_path / 'metadata.csv').exists():
+            raise FileNotFoundError(f"Metadata file not found at {self.data_path / 'metadata.csv'}")
 
         # check if config file exists
-        if not Path(config_path).exists():
+        if not config_path.exists():
             raise FileNotFoundError(f'Config file not found at {config_path}')
 
         # load config
-        with open(Path(config_path), 'r') as f:
+        with open(config_path, 'r') as f:
             self.config = yaml.safe_load(f)
 
         self.load_val_label_map = self.config['labels']
 
         # load metadata
         metadata = self._filter_metadata(
-            pd.read_csv(Path(data_path) / 'metadata.csv'), 
+            pd.read_csv(self.data_path / 'metadata.csv'), 
             self.type, 
             self.config
         )
@@ -125,6 +126,46 @@ class OrionAEFrameDataset(Dataset):
 
         return label_names, file_labels
 
+    def _preprocess_data(self, data: np.ndarray) -> np.ndarray:
+        """
+        Preprocesses the data.
+        """
+        return data
+    
+    def _extract_features(self, data: np.ndarray) -> dict:
+        """
+        Extracts the features from the data.
+        """
+        return {}
+
+    def _load_data(self, file_path: str) -> np.ndarray:
+        """
+        Loads the data from a file.
+        """
+        # Resolve relative file_path to absolute path relative to data_path
+        full_path = self.data_path / file_path
+        return np.load(full_path)
+        
+    def _locate_file_and_frame_index(self, index: int) -> tuple[int, int]:
+           """
+           Locates the file index and local frame index for a given global frame index.
+
+           Args:
+               index: Global frame index in the dataset
+
+           Returns:
+               tuple: (file_index, local_frame_index) where:
+                   - file_index: Index of the file containing this frame
+                   - local_frame_index: Index of the frame within that file (0-based)
+           """
+           # Iterate backwards to find the largest offset <= index
+           for file_index in range(len(self.file_frame_offsets) - 1, -1, -1):
+               if index >= self.file_frame_offsets[file_index]:
+                   local_frame_index = index - self.file_frame_offsets[file_index]
+                   return file_index, local_frame_index
+
+           # This should never happen if index is valid, but return 0 as fallback
+           return 0, index
 
     def __len__(self):
         return self.num_frames
@@ -133,14 +174,13 @@ class OrionAEFrameDataset(Dataset):
         sample_item = {}
 
         # locate file index where the frame is located 
+        file_index, local_frame_index = self._locate_file_and_frame_index(index)
+        file_path = self.file_paths[file_index]
+        file_label = self.file_labels[file_index]
+
+        sample_item['raw'] = self._load_data(file_path)[local_frame_index]
+        sample_item['preprocessed'] = self._preprocess_data(sample_item['raw'])
+        sample_item['features'] = self._extract_features(sample_item['preprocessed'])
+        sample_item['label'] = file_label
 
         return sample_item
-        
-    def _locate_file_index(self, index: int) -> int:
-        """
-        Locates the file index where the frame is located.
-        """
-        for file_index, file_frame_offset in enumerate(self.file_frame_offsets):
-            if index < file_frame_offset:
-                return file_index
-        return len(self.file_frame_offsets) - 1
