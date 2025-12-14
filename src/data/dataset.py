@@ -1,9 +1,12 @@
 from pathlib import Path
 from torch.utils.data import Dataset
+from typing import Optional
 
 import pandas as pd
 import numpy as np
 import yaml
+
+from src.data.transforms.preprocessing import PreprocessingPipeline
 
 
 class OrionAEFrameDataset(Dataset):
@@ -13,6 +16,7 @@ class OrionAEFrameDataset(Dataset):
         data_path: str,
         config_path: str,
         type: str = 'train', # 'train', 'val', 'test'
+        preprocessing_pipeline: Optional[PreprocessingPipeline] = None,
     ):
         # Convert to Path objects if strings are passed
         self.data_path = Path(data_path)
@@ -33,6 +37,10 @@ class OrionAEFrameDataset(Dataset):
             self.config = yaml.safe_load(f)
 
         self.load_val_label_map = self.config['labels']
+
+        # Initialize preprocessing pipeline
+        # If not provided, create an empty pipeline (no-op)
+        self.preprocessing_pipeline = preprocessing_pipeline or PreprocessingPipeline()
 
         # load metadata
         metadata = self._filter_metadata(
@@ -128,9 +136,10 @@ class OrionAEFrameDataset(Dataset):
 
     def _preprocess_data(self, data: np.ndarray) -> np.ndarray:
         """
-        Preprocesses the data.
+        Preprocesses the data using the configured preprocessing pipeline.
+        The pipeline applies filters first, then normalizations, serially.
         """
-        return data
+        return self.preprocessing_pipeline(data)
     
     def _extract_features(self, data: np.ndarray) -> dict:
         """
