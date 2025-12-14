@@ -11,6 +11,8 @@ from src.data.transforms.preprocessing import PreprocessingPipeline
 
 class OrionAEFrameDataset(Dataset):
 
+    CHANNELS = ['A', 'B', 'C', 'D']
+
     def __init__(
         self,
         data_path: str,
@@ -37,6 +39,22 @@ class OrionAEFrameDataset(Dataset):
             self.config = yaml.safe_load(f)
 
         self.load_val_label_map = self.config['labels']
+        
+        # Get selected channels from config and validate
+        selected_channels = self.config.get('channels', self.CHANNELS)
+        if not isinstance(selected_channels, list):
+            raise ValueError(f"channels in config must be a list, got {type(selected_channels)}")
+        
+        # Validate that all selected channels exist
+        invalid_channels = [ch for ch in selected_channels if ch not in self.CHANNELS]
+        if invalid_channels:
+            raise ValueError(f"Invalid channels in config: {invalid_channels}. Valid channels are: {self.CHANNELS}")
+        
+        self.selected_channels = selected_channels
+        
+        # Create channel indices for fast indexing
+        # Maps selected channel names to their indices in the full CHANNELS list
+        self.channel_indices = [self.CHANNELS.index(ch) for ch in self.selected_channels]
 
         # Initialize preprocessing pipeline
         # If not provided, create an empty pipeline (no-op)
@@ -134,6 +152,21 @@ class OrionAEFrameDataset(Dataset):
 
         return label_names, file_labels
 
+    def _select_channels(self, data: np.ndarray) -> np.ndarray:
+        """
+        Selects only the channels specified in config.
+        
+        Args:
+            data: Raw data array with shape (time_steps, num_channels)
+                  where num_channels matches len(CHANNELS)
+        
+        Returns:
+            Data array with only selected channels, shape (time_steps, len(selected_channels))
+        """
+        # Data shape: (time_steps, num_channels)
+        # Select channels using indices
+        return data[:, self.channel_indices]
+
     def _preprocess_data(self, data: np.ndarray) -> np.ndarray:
         """
         Preprocesses the data using the configured preprocessing pipeline.
@@ -187,7 +220,13 @@ class OrionAEFrameDataset(Dataset):
         file_path = self.file_paths[file_index]
         file_label = self.file_labels[file_index]
 
-        sample_item['raw'] = self._load_data(file_path)[local_frame_index]
+        # Load raw data for the frame
+        raw_data = self._load_data(file_path)[local_frame_index]  # Shape: (time_steps, num_channels)
+        
+        # Select only configured channels
+        sample_item['raw'] = self._select_channels(raw_data)  # Shape: (time_steps, len(selected_channels))
+        
+        # Preprocess the selected channels
         sample_item['preprocessed'] = self._preprocess_data(sample_item['raw'])
         sample_item['features'] = self._extract_features(sample_item['preprocessed'])
         sample_item['label'] = file_label

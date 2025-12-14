@@ -8,7 +8,8 @@ splits:
     train: [0,1,2,3,4,5,6,7]
     val: [8,9]
   test: ['F'] # always serie-based split
-channels: ["A", "B", "C", "D"] # define selectedchannels here based on channel names
+# channels: ["A", "B", "C", "D"] # define selectedchannels here based on channel names
+channels: ["A", "B", "C"] # define selectedchannels here based on channel names
 labels: 
   # define labels here based on load values
   # the idea is that can create different set of labels with different load combinations
