@@ -70,14 +70,17 @@ class OrionAEFrameDataset(Dataset):
         self.num_frames = sum(metadata['num_frames'])
         self.file_paths = metadata['file_path'].tolist()
         self.file_frame_offsets = []
-
-        for file_path, file_path_idx in zip(self.file_paths, range(len(self.file_paths))):
-            if file_path_idx == 0:
-                self.file_frame_offsets.append(0)
-            else:
-                self.file_frame_offsets.append(
-                    self.file_frame_offsets[-1] + metadata.loc[metadata['file_path'] == file_path, 'num_frames'].values[0]
-                )
+        self.file_num_frames = []  # Store num_frames for each file for bounds checking
+        
+        # Calculate cumulative offsets: offset[i] = sum of frames in files 0 to i-1
+        # This means file i contains frames from offset[i] to offset[i] + num_frames[i] - 1
+        cumulative_offset = 0
+        for file_path in self.file_paths:
+            self.file_frame_offsets.append(cumulative_offset)
+            # Get num_frames for this file from metadata
+            file_num_frames = metadata.loc[metadata['file_path'] == file_path, 'num_frames'].values[0]
+            self.file_num_frames.append(file_num_frames)
+            cumulative_offset += file_num_frames
         
         self.label_names, self.file_labels = self._build_file_labels(metadata, self.load_val_label_map)
         
@@ -189,25 +192,38 @@ class OrionAEFrameDataset(Dataset):
         return np.load(full_path)
         
     def _locate_file_and_frame_index(self, index: int) -> tuple[int, int]:
-           """
-           Locates the file index and local frame index for a given global frame index.
+        """
+        Locates the file index and local frame index for a given global frame index.
 
-           Args:
-               index: Global frame index in the dataset
+        Args:
+            index: Global frame index in the dataset
 
-           Returns:
-               tuple: (file_index, local_frame_index) where:
-                   - file_index: Index of the file containing this frame
-                   - local_frame_index: Index of the frame within that file (0-based)
-           """
-           # Iterate backwards to find the largest offset <= index
-           for file_index in range(len(self.file_frame_offsets) - 1, -1, -1):
-               if index >= self.file_frame_offsets[file_index]:
-                   local_frame_index = index - self.file_frame_offsets[file_index]
-                   return file_index, local_frame_index
+        Returns:
+            tuple: (file_index, local_frame_index) where:
+                - file_index: Index of the file containing this frame
+                - local_frame_index: Index of the frame within that file (0-based)
+        """
+        # Validate index
+        if index < 0 or index >= self.num_frames:
+            raise IndexError(f"Index {index} is out of range [0, {self.num_frames})")
+        
+        # Iterate backwards to find the largest offset <= index
+        # This finds the file that contains this global index
+        for file_index in range(len(self.file_frame_offsets) - 1, -1, -1):
+            if index >= self.file_frame_offsets[file_index]:
+                local_frame_index = index - self.file_frame_offsets[file_index]
+                
+                # Verify bounds (safety check using stored num_frames)
+                if local_frame_index >= self.file_num_frames[file_index]:
+                    raise IndexError(
+                        f"Local frame index {local_frame_index} is out of bounds for file {self.file_paths[file_index]} "
+                        f"(file has {self.file_num_frames[file_index]} frames)"
+                    )
+                
+                return file_index, local_frame_index
 
-           # This should never happen if index is valid, but return 0 as fallback
-           return 0, index
+        # This should never happen if index is valid, but return 0 as fallback
+        return 0, index
 
     def __len__(self):
         return self.num_frames

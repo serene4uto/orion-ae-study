@@ -138,14 +138,14 @@ class MinMaxNorm(BaseTransform):
 class RefBasedNorm(BaseTransform):
     """Reference-based normalization using mean and std from reference data."""
     
-    def __init__(self, mean: np.ndarray, std: np.ndarray):
+    def __init__(self, mean: [float], std: [float]):
         """
         Args:
-            mean: Array of shape (channels,) or (1, channels) containing per-channel means
-            std: Array of shape (channels,) or (1, channels) containing per-channel standard deviations
+            mean: List of means for each channel
+            std: List of standard deviations for each channel
         """
-        self.mean = np.asarray(mean)
-        self.std = np.asarray(std)
+        self.mean = np.asarray(np.array(mean))
+        self.std = np.asarray(np.array(std))
         
         # Ensure mean and std are 1D or 2D with compatible shapes
         if self.mean.ndim > 2 or self.std.ndim > 2:
