@@ -61,6 +61,9 @@ class SimpleCNN(BaseModel):
     """
     Simple 1D CNN for time series classification.
     
+    Uses stride=2 in conv layers for wavelet-like downsampling (filter bank + decimation).
+    Applies global pooling at the end to collapse temporal dimension.
+    
     Input shape: (batch_size, time_steps, channels)
     Output shape: (batch_size, num_classes)
     """
@@ -71,7 +74,10 @@ class SimpleCNN(BaseModel):
         num_classes: int = 7,
         num_filters: list = None,  # List of filter sizes for each conv layer
         kernel_sizes: list = None,  # List of kernel sizes for each conv layer
+        strides: list = None,  # List of strides for each conv layer (for downsampling)
         dropout: float = 0.5,
+        global_pool: str = 'avg',  # 'avg' or 'max' for global pooling
+        fc_hidden_sizes: list = None,  # List of hidden layer sizes for FC layers, e.g. [128] or [256, 128]
     ):
         super().__init__()
         
@@ -85,45 +91,65 @@ class SimpleCNN(BaseModel):
             num_filters = [64, 128, 256]
         if kernel_sizes is None:
             kernel_sizes = [7, 5, 3]
+        if strides is None:
+            strides = [2, 2, 2]
+        if fc_hidden_sizes is None:
+            fc_hidden_sizes = [128]  # Default: single hidden layer of size 128
         
-        if len(num_filters) != len(kernel_sizes):
-            raise ValueError("num_filters and kernel_sizes must have the same length")
+        if len(num_filters) != len(kernel_sizes) or len(num_filters) != len(strides):
+            raise ValueError("num_filters, kernel_sizes, and strides must have the same length")
         
-        # Build convolutional layers
+        # Build convolutional layers with stride-based downsampling (wavelet-like)
         conv_layers = []
         in_channels = num_channels
         
-        for i, (out_channels, kernel_size) in enumerate(zip(num_filters, kernel_sizes)):
+        for i, (out_channels, kernel_size, stride) in enumerate(zip(num_filters, kernel_sizes, strides)):
             conv_layers.extend([
                 nn.Conv1d(
                     in_channels=in_channels,
                     out_channels=out_channels,
                     kernel_size=kernel_size,
+                    stride=stride,  # Stride-based downsampling (like DWT decimation)
                     padding=kernel_size // 2  # Same padding
                 ),
                 nn.BatchNorm1d(out_channels),
                 nn.ReLU(inplace=True),
-                nn.MaxPool1d(kernel_size=2, stride=2)  # Reduce time dimension by half
             ])
             in_channels = out_channels
         
         self.conv_layers = nn.Sequential(*conv_layers)
         
-        # Calculate the output size after convolutions
-        # We need to compute the size after all conv and pooling operations
-        with torch.no_grad():
-            dummy_input = torch.zeros(1, num_channels, time_steps)
-            dummy_output = self.conv_layers(dummy_input)
-            conv_output_size = dummy_output.numel() // dummy_output.shape[0]  # Flattened size per sample
+        # Global pooling to collapse temporal dimension
+        if global_pool == 'avg':
+            self.global_pool = nn.AdaptiveAvgPool1d(1)
+        elif global_pool == 'max':
+            self.global_pool = nn.AdaptiveMaxPool1d(1)
+        else:
+            raise ValueError(f"global_pool must be 'avg' or 'max', got {global_pool}")
         
-        # Fully connected layers
-        self.fc_layers = nn.Sequential(
+        # After global pooling: (batch, channels, 1) -> flatten to (batch, channels)
+        # The number of channels is the last num_filters value
+        final_channels = num_filters[-1]
+        
+        # Build fully connected layers
+        fc_layers = []
+        fc_input_size = final_channels
+        
+        for hidden_size in fc_hidden_sizes:
+            fc_layers.extend([
+                nn.Dropout(dropout),
+                nn.Linear(fc_input_size, hidden_size),
+                nn.ReLU(inplace=True),
+            ])
+            fc_input_size = hidden_size
+        
+        # Final layer to num_classes
+        fc_layers.extend([
             nn.Dropout(dropout),
-            nn.Linear(conv_output_size, 128),
-            nn.ReLU(inplace=True),
-            nn.Dropout(dropout),
-            nn.Linear(128, num_classes)
-        )
+            nn.Linear(fc_input_size, num_classes)
+        ])
+        
+        self.fc_layers = nn.Sequential(*fc_layers)
     
     def forward(self, x):
         """
@@ -138,11 +164,14 @@ class SimpleCNN(BaseModel):
         # Transpose from (batch, time, channels) to (batch, channels, time) for Conv1d
         x = x.transpose(1, 2)  # (batch_size, channels, time_steps)
         
-        # Apply convolutional layers
-        x = self.conv_layers(x)
+        # Apply convolutional layers with stride-based downsampling
+        x = self.conv_layers(x)  # (batch_size, final_channels, reduced_time_steps)
         
-        # Flatten
-        x = x.view(x.size(0), -1)
+        # Global pooling to collapse temporal dimension
+        x = self.global_pool(x)  # (batch_size, final_channels, 1)
+        
+        # Flatten: (batch_size, final_channels, 1) -> (batch_size, final_channels)
+        x = x.squeeze(-1)
         
         # Apply fully connected layers
         x = self.fc_layers(x)

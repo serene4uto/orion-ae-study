@@ -9,6 +9,9 @@ import torch.nn as nn
 from torch.utils.data import DataLoader
 from tqdm import tqdm
 import numpy as np
+import json
+from torch.utils.tensorboard import SummaryWriter
+from datetime import datetime
 
 from src.data.dataset import OrionAEFrameDataset
 from src.models import get_model
@@ -134,6 +137,8 @@ def main():
                         help='Device to use (cuda/cpu/auto, default: auto)')
     parser.add_argument('--num_workers', type=int, default=0,
                         help='Number of data loader workers (default: 0)')
+    parser.add_argument('--experiment_name', type=str, default=None,
+                        help='Experiment name for TensorBoard logging (default: auto-generated)')
     
     args = parser.parse_args()
     
@@ -145,11 +150,11 @@ def main():
     print(f'Using device: {device}')
     
     # Load dataset config
-    with open(args.dataset_config, 'r') as f:
+    with open(args.dataset_config, 'r', encoding='utf-8') as f:
         dataset_config = yaml.safe_load(f)
     
     # Load model config
-    with open(args.model_config, 'r') as f:
+    with open(args.model_config, 'r', encoding='utf-8') as f:
         model_config = yaml.safe_load(f)
     
     # Get number of classes from dataset config
@@ -181,11 +186,14 @@ def main():
     print(f'Test samples: {len(test_dataset)}')
     
     # Create data loaders
+    pin_memory = device.type == 'cuda'
+    
     train_loader = DataLoader(
         train_dataset,
         batch_size=args.batch_size,
         shuffle=True,
-        num_workers=args.num_workers,
+        num_workers=4,  # Change from 0 to 4-8
+        pin_memory=pin_memory,  # Add this
         collate_fn=collate_fn
     )
     
@@ -193,7 +201,8 @@ def main():
         val_dataset,
         batch_size=args.batch_size,
         shuffle=False,
-        num_workers=args.num_workers,
+        num_workers=4,  # Change from 0
+        pin_memory=pin_memory,  # Add this
         collate_fn=collate_fn
     )
     
@@ -201,7 +210,8 @@ def main():
         test_dataset,
         batch_size=args.batch_size,
         shuffle=False,
-        num_workers=args.num_workers,
+        num_workers=4,  # Change from 0
+        pin_memory=pin_memory,  # Add this
         collate_fn=collate_fn
     )
     
@@ -235,9 +245,30 @@ def main():
     criterion = nn.CrossEntropyLoss()
     optimizer = torch.optim.Adam(model.parameters(), lr=args.lr)
     
+    # TensorBoard logging with experiment name
+    if args.experiment_name:
+        exp_name = args.experiment_name
+    else:
+        # Auto-generate name: model_name_timestamp
+        exp_name = f"{model_name}_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+    
+    log_dir = Path('runs') / exp_name
+    writer = SummaryWriter(log_dir=str(log_dir))
+    print(f'TensorBoard logs: {log_dir}')
+    print(f'View with: tensorboard --logdir=runs')
+    
+    # Create checkpoint directory
+    checkpoint_dir = log_dir / 'checkpoints'
+    checkpoint_dir.mkdir(exist_ok=True)
+    
     # Training loop
     print('\nStarting training...')
     best_val_acc = 0.0
+    best_epoch = 0
+    best_model_state = None
+    best_train_loss = None
+    best_train_acc = None
+    best_val_loss = None
     
     for epoch in range(args.epochs):
         print(f'\nEpoch {epoch + 1}/{args.epochs}')
@@ -249,26 +280,106 @@ def main():
         # Validate
         val_loss, val_acc = validate_epoch(model, val_loader, criterion, device)
         
+        # Log to TensorBoard
+        writer.add_scalar('Loss/Train', train_loss, epoch + 1)
+        writer.add_scalar('Loss/Val', val_loss, epoch + 1)
+        writer.add_scalar('Accuracy/Train', train_acc, epoch + 1)
+        writer.add_scalar('Accuracy/Val', val_acc, epoch + 1)
+        
         # Print epoch summary
         print(f'\nEpoch {epoch + 1} Summary:')
         print(f'  Train Loss: {train_loss:.4f}, Train Acc: {train_acc:.2f}%')
         print(f'  Val Loss: {val_loss:.4f}, Val Acc: {val_acc:.2f}%')
         
-        # Save best model (optional - you can add model saving logic here)
+        # Save best model based on validation accuracy
         if val_acc > best_val_acc:
             best_val_acc = val_acc
-            print(f'  ✓ New best validation accuracy: {best_val_acc:.2f}%')
+            best_epoch = epoch + 1
+            best_train_loss = train_loss
+            best_train_acc = train_acc
+            best_val_loss = val_loss
+            best_model_state = model.state_dict().copy()
+            
+            # Save checkpoint
+            checkpoint_path = checkpoint_dir / 'best_model.pt'
+            torch.save({
+                'epoch': best_epoch,
+                'model_state_dict': best_model_state,
+                'optimizer_state_dict': optimizer.state_dict(),
+                'val_acc': best_val_acc,
+                'val_loss': best_val_loss,
+                'train_acc': best_train_acc,
+                'train_loss': best_train_loss,
+            }, checkpoint_path)
+            
+            print(f'  ✓ New best validation accuracy: {best_val_acc:.2f}% (epoch {best_epoch})')
+            print(f'  ✓ Model saved to: {checkpoint_path}')
     
     print('\nTraining completed!')
-    print(f'Best validation accuracy: {best_val_acc:.2f}%')
+    print(f'Best validation accuracy: {best_val_acc:.2f}% at epoch {best_epoch}')
+    print(f'Best epoch metrics:')
+    print(f'  Train Loss: {best_train_loss:.4f}, Train Acc: {best_train_acc:.2f}%')
+    print(f'  Val Loss: {best_val_loss:.4f}, Val Acc: {best_val_acc:.2f}%')
     
-    # Evaluate on test set
+    # Load best model for test evaluation
     print('\n' + '=' * 50)
-    print('Evaluating on test set...')
+    print(f'Loading best model (epoch {best_epoch}) for test evaluation...')
     print('=' * 50)
+    model.load_state_dict(best_model_state)
+    
+    # Evaluate on test set with best model
+    print('\nEvaluating on test set...')
     test_loss, test_acc = validate_epoch(model, test_loader, criterion, device)
-    print(f'\nTest Results:')
+    
+    writer.close()
+    
+    print(f'\nTest Results (using best model from epoch {best_epoch}):')
     print(f'  Test Loss: {test_loss:.4f}, Test Acc: {test_acc:.2f}%')
+    print(f'\nBest model checkpoint saved at: {checkpoint_dir / "best_model.pt"}')
+    
+    # Save training info in human-readable format (JSON)
+    training_info = {
+        'experiment_name': exp_name,
+        'model_name': model_name,
+        'model_params': model_params,
+        'hyperparameters': {
+            'batch_size': args.batch_size,
+            'learning_rate': args.lr,
+            'num_epochs': args.epochs,
+            'num_workers': 4,
+            'device': str(device),
+        },
+        'dataset_info': {
+            'data_path': str(args.data_path),
+            'num_classes': num_classes,
+            'input_shape': list(preprocessed_shape),
+            'train_samples': len(train_dataset),
+            'val_samples': len(val_dataset),
+            'test_samples': len(test_dataset),
+        },
+        'best_epoch': best_epoch,
+        'best_metrics': {
+            'train_loss': float(best_train_loss),
+            'train_acc': float(best_train_acc),
+            'val_loss': float(best_val_loss),
+            'val_acc': float(best_val_acc),
+        },
+        'test_metrics': {
+            'test_loss': float(test_loss),
+            'test_acc': float(test_acc),
+        },
+        'model_info': {
+            'total_parameters': int(total_params),
+            'trainable_parameters': int(trainable_params),
+        }
+    }
+    
+    # Save as JSON
+    info_file = log_dir / 'training_info.json'
+    with open(info_file, 'w', encoding='utf-8') as f:
+        json.dump(training_info, f, indent=2, ensure_ascii=False)
+    
+    print(f'Training info saved to: {info_file}')
 
 
 if __name__ == '__main__':
