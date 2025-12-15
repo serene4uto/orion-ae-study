@@ -15,7 +15,7 @@ from datetime import datetime
 
 from src.data.dataset import OrionAEFrameDataset
 from src.models import get_model
-from src.data.transforms.preprocessing import PreprocessingPipeline
+from src.data.transforms.preprocessing import PreprocessingPipeline, HighPassFilter
 
 
 def collate_fn(batch):
@@ -160,25 +160,32 @@ def main():
     # Get number of classes from dataset config
     num_classes = len(dataset_config['labels'])
     print(f'Number of classes: {num_classes}')
+
+    prepprocess_pipeline = PreprocessingPipeline(
+        filters=[HighPassFilter(cutoff=100, fs=5e6, order=5)]
+    )
     
     # Create datasets
     print('Loading datasets...')
     train_dataset = OrionAEFrameDataset(
         data_path=args.data_path,
         config_path=args.dataset_config,
-        type='train'
+        type='train',
+        preprocessing_pipeline=prepprocess_pipeline
     )
     
     val_dataset = OrionAEFrameDataset(
         data_path=args.data_path,
         config_path=args.dataset_config,
-        type='val'
+        type='val',
+        preprocessing_pipeline=prepprocess_pipeline
     )
     
     test_dataset = OrionAEFrameDataset(
         data_path=args.data_path,
         config_path=args.dataset_config,
-        type='test'
+        type='test',
+        preprocessing_pipeline=prepprocess_pipeline
     )
     
     print(f'Train samples: {len(train_dataset)}')
