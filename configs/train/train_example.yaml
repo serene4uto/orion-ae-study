@@ -1,0 +1,12 @@
+train:
+  criterion: 
+    - name: "CrossEntropyLoss"
+      weight: 1.0
+      params: None
+  optimizer:
+    - name: "Adam"
+      lr: 0.001
+      params: None
+  device: "cuda"
+  num_epochs: 100
+  batch_size: 4

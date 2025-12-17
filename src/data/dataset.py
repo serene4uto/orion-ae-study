@@ -165,6 +165,7 @@ class OrionAEFrameDataset(Dataset):
         
         Returns:
             Data array with only selected channels, shape (time_steps, len(selected_channels))
+            Note: This will be transposed to (channels, time_steps) in __getitem__
         """
         # Data shape: (time_steps, num_channels)
         # Select channels using indices
@@ -238,11 +239,14 @@ class OrionAEFrameDataset(Dataset):
 
         # Load raw data for the frame
         raw_data = self._load_data(file_path)[local_frame_index]  # Shape: (time_steps, num_channels)
-        
+
         # Select only configured channels
-        sample_item['raw'] = self._select_channels(raw_data)  # Shape: (time_steps, len(selected_channels))
-        
-        # Preprocess the selected channels
+        selected_data = self._select_channels(raw_data)  # Shape: (time_steps, len(selected_channels))
+
+        # Reshape to (channels, time_steps) for model consumption
+        sample_item['raw'] = selected_data.T  # Shape: (channels, time_steps)
+
+        # Preprocess the selected channels (input is now (channels, time_steps))
         sample_item['preprocessed'] = self._preprocess_data(sample_item['raw'])
         sample_item['features'] = self._extract_features(sample_item['preprocessed'])
         sample_item['label'] = file_label

@@ -93,7 +93,8 @@ class HighPassFilter(BaseTransform):
         if data.ndim == 1:
             return signal.sosfilt(self.sos, data)
         else:
-            # Apply filter along the last axis (assumes time is last dimension)
+            # Apply filter along the last axis (time dimension)
+            # For data shape (channels, time_steps), filters along axis=-1 (time_steps)
             return signal.sosfilt(self.sos, data, axis=-1)
 
 
@@ -114,12 +115,12 @@ class MinMaxNorm(BaseTransform):
     def __call__(self, data: np.ndarray) -> np.ndarray:
         """
         Apply min-max normalization per channel.
-        For data shape (time_steps, channels), normalizes each channel independently
-        by computing min/max along the time dimension (axis=0).
+        For data shape (channels, time_steps), normalizes each channel independently
+        by computing min/max along the time dimension (axis=1).
         """
-        # Compute min/max along time axis (axis=0) for each channel
-        data_min = np.min(data, axis=0, keepdims=True)  # Shape: (1, channels)
-        data_max = np.max(data, axis=0, keepdims=True)  # Shape: (1, channels)
+        # Compute min/max along time axis (axis=1) for each channel
+        data_min = np.min(data, axis=1, keepdims=True)  # Shape: (channels, 1)
+        data_max = np.max(data, axis=1, keepdims=True)  # Shape: (channels, 1)
         
         # Avoid division by zero
         data_range = data_max - data_min
@@ -163,7 +164,7 @@ class RefBasedNorm(BaseTransform):
         Normalize data using reference mean and std per channel.
         
         Args:
-            data: Array of shape (time_steps, channels) to normalize.
+            data: Array of shape (channels, time_steps) to normalize.
                   Each channel is normalized using its corresponding mean/std value.
         
         Returns:
@@ -174,16 +175,16 @@ class RefBasedNorm(BaseTransform):
         # Validate data shape matches expected number of channels
         if data.ndim != 2:
             raise ValueError(
-                f"data must be 2D array (time_steps, channels), got shape {data.shape}"
+                f"data must be 2D array (channels, time_steps), got shape {data.shape}"
             )
         
-        if data.shape[1] != len(self.mean):
+        if data.shape[0] != len(self.mean):
             raise ValueError(
-                f"Number of channels in data ({data.shape[1]}) must match "
+                f"Number of channels in data ({data.shape[0]}) must match "
                 f"number of channels in mean/std ({len(self.mean)})"
             )
         
-        # Broadcasting: (time_steps, channels) - (channels,) → (time_steps, channels)
-        # NumPy automatically broadcasts (channels,) to match (time_steps, channels)
-        # Each channel column is normalized independently using its mean/std
-        return (data - self.mean) / self.std
+        # Broadcasting: (channels, time_steps) - (channels,) → (channels, time_steps)
+        # NumPy automatically broadcasts (channels,) to match (channels, time_steps)
+        # Each channel row is normalized independently using its mean/std
+        return (data - self.mean[:, np.newaxis]) / self.std[:, np.newaxis]

@@ -1,9 +1,10 @@
-model_name: simple_cnn
-params:
-  num_classes: 7
-  num_filters: [64, 128, 256]   # 3 conv blocks (3 scales)
-  kernel_sizes: [9, 7, 5]       # 5–9 taps, decreasing with depth
-  strides: [2, 2, 2]            # stride 2 → dyadic downsampling at each level
-  dropout: 0.5                  # Dropout rate
-  fc_hidden_sizes: [128]        # FC hidden layer sizes, e.g. [128] or [256, 128] for multiple layers
+model:
+  model_name: simple_cnn
+  params:
+    num_classes: 7
+    num_filters: [64, 128, 256]   # 3 conv blocks (3 scales)
+    kernel_sizes: [9, 7, 5]       # 5–9 taps, decreasing with depth
+    strides: [2, 2, 2]            # stride 2 → dyadic downsampling at each level
+    dropout: 0.5                  # Dropout rate
+    fc_hidden_sizes: [128]        # FC hidden layer sizes, e.g. [128] or [256, 128] for multiple layers
 

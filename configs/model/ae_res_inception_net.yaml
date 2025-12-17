@@ -1,0 +1,14 @@
+model:
+  model_name: ae_res_inception_net
+  params:
+    in_channels: 1                    # Input channels (e.g., single sensor channel)
+    num_classes: 7                     # Number of output classes
+    stem_kernel: 15                    # Stem convolution kernel size (height dimension)
+    stem_downsampling: 5               # Stem stride for downsampling
+    stem_channels: 32                  # Number of channels after stem
+    inception_block_num: 3            # Number of Inception blocks in series
+    inception_kernels: [11, 51, 201]  # Multi-scale kernel sizes for Inception blocks
+    inception_bottleneck_channels: 16  # Bottleneck channels in Inception blocks
+    inception_out_channels_per_block: 16  # Output channels per Inception block branch
+    dropout: 0.5                       # Dropout rate for classifier head
+    fc_hidden_sizes: [128]             # FC hidden layer sizes, e.g. [128] or [256, 128]
