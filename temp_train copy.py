@@ -47,7 +47,7 @@ def collate_fn(batch):
     }
 
 
-def train_epoch(model, dataloader, criterion, optimizer, device, l1_reg=0.0):
+def train_epoch(model, dataloader, criterion, optimizer, device):
     """Train for one epoch."""
     model.train()
     total_loss = 0.0
@@ -66,13 +66,6 @@ def train_epoch(model, dataloader, criterion, optimizer, device, l1_reg=0.0):
         
         # Compute loss
         loss = criterion(outputs, labels)
-        
-        # Add L1 regularization if specified
-        if l1_reg > 0.0:
-            l1_loss = 0.0
-            for param in model.parameters():
-                l1_loss += torch.sum(torch.abs(param))
-            loss += l1_reg * l1_loss
         
         # Backward pass
         loss.backward()
@@ -152,10 +145,6 @@ def main():
                         help='Number of data loader workers (default: 0)')
     parser.add_argument('--experiment_name', type=str, default=None,
                         help='Experiment name for TensorBoard logging (default: auto-generated)')
-    parser.add_argument('--weight_decay', type=float, default=0.0,
-                        help='L2 regularization (weight decay) coefficient (default: 0.0)')
-    parser.add_argument('--l1_reg', type=float, default=0.0,
-                        help='L1 regularization coefficient (default: 0.0)')
     
     args = parser.parse_args()
     
@@ -303,7 +292,7 @@ def main():
     
     # Setup loss and optimizer
     criterion = nn.CrossEntropyLoss()
-    optimizer = torch.optim.Adam(model.parameters(), lr=args.lr, weight_decay=args.weight_decay)
+    optimizer = torch.optim.Adam(model.parameters(), lr=args.lr)
     
     # TensorBoard logging with experiment name
     if args.experiment_name:
@@ -329,35 +318,27 @@ def main():
     best_train_loss = None
     best_train_acc = None
     best_val_loss = None
-    best_test_acc = None  # Add this
-    best_test_loss = None  # Add this
     
     for epoch in range(args.epochs):
         print(f'\nEpoch {epoch + 1}/{args.epochs}')
         print('-' * 50)
         
         # Train
-        train_loss, train_acc = train_epoch(model, train_loader, criterion, optimizer, device, l1_reg=args.l1_reg)
+        train_loss, train_acc = train_epoch(model, train_loader, criterion, optimizer, device)
         
         # Validate
         val_loss, val_acc = validate_epoch(model, val_loader, criterion, device)
         
-        # Test evaluation at every epoch
-        test_loss, test_acc = validate_epoch(model, test_loader, criterion, device)
-        
         # Log to TensorBoard
         writer.add_scalar('Loss/Train', train_loss, epoch + 1)
         writer.add_scalar('Loss/Val', val_loss, epoch + 1)
-        writer.add_scalar('Loss/Test', test_loss, epoch + 1)  # Add this
         writer.add_scalar('Accuracy/Train', train_acc, epoch + 1)
         writer.add_scalar('Accuracy/Val', val_acc, epoch + 1)
-        writer.add_scalar('Accuracy/Test', test_acc, epoch + 1)  # Add this
         
         # Print epoch summary
         print(f'\nEpoch {epoch + 1} Summary:')
         print(f'  Train Loss: {train_loss:.4f}, Train Acc: {train_acc:.2f}%')
         print(f'  Val Loss: {val_loss:.4f}, Val Acc: {val_acc:.2f}%')
-        print(f'  Test Loss: {test_loss:.4f}, Test Acc: {test_acc:.2f}%')  # Add this
         
         # Save best model based on validation accuracy
         if val_acc > best_val_acc:
@@ -366,8 +347,6 @@ def main():
             best_train_loss = train_loss
             best_train_acc = train_acc
             best_val_loss = val_loss
-            best_test_loss = test_loss  # Add this
-            best_test_acc = test_acc  # Add this
             best_model_state = model.state_dict().copy()
             
             # Save checkpoint
@@ -380,8 +359,6 @@ def main():
                 'val_loss': best_val_loss,
                 'train_acc': best_train_acc,
                 'train_loss': best_train_loss,
-                'test_acc': best_test_acc,  # Add this
-                'test_loss': best_test_loss,  # Add this
             }, checkpoint_path)
             
             print(f'  ✓ New best validation accuracy: {best_val_acc:.2f}% (epoch {best_epoch})')
@@ -392,22 +369,21 @@ def main():
     print(f'Best epoch metrics:')
     print(f'  Train Loss: {best_train_loss:.4f}, Train Acc: {best_train_acc:.2f}%')
     print(f'  Val Loss: {best_val_loss:.4f}, Val Acc: {best_val_acc:.2f}%')
-    print(f'  Test Loss: {best_test_loss:.4f}, Test Acc: {best_test_acc:.2f}%')  # Add this
     
-    # Load best model for final test evaluation (optional, since we already have test metrics)
+    # Load best model for test evaluation
     print('\n' + '=' * 50)
-    print(f'Final evaluation with best model (epoch {best_epoch})...')
+    print(f'Loading best model (epoch {best_epoch}) for test evaluation...')
     print('=' * 50)
     model.load_state_dict(best_model_state)
     
-    # Final test evaluation with best model (for consistency)
-    print('\nFinal test evaluation...')
-    final_test_loss, final_test_acc = validate_epoch(model, test_loader, criterion, device)
+    # Evaluate on test set with best model
+    print('\nEvaluating on test set...')
+    test_loss, test_acc = validate_epoch(model, test_loader, criterion, device)
     
     writer.close()
     
-    print(f'\nFinal Test Results (using best model from epoch {best_epoch}):')
-    print(f'  Test Loss: {final_test_loss:.4f}, Test Acc: {final_test_acc:.2f}%')
+    print(f'\nTest Results (using best model from epoch {best_epoch}):')
+    print(f'  Test Loss: {test_loss:.4f}, Test Acc: {test_acc:.2f}%')
     print(f'\nBest model checkpoint saved at: {checkpoint_dir / "best_model.pt"}')
     
     # Save training info in human-readable format (JSON)
@@ -421,8 +397,6 @@ def main():
             'num_epochs': args.epochs,
             'num_workers': 4,
             'device': str(device),
-            'weight_decay': args.weight_decay,
-            'l1_reg': args.l1_reg,
         },
         'dataset_info': {
             'data_path': str(args.data_path),
@@ -438,12 +412,10 @@ def main():
             'train_acc': float(best_train_acc),
             'val_loss': float(best_val_loss),
             'val_acc': float(best_val_acc),
-            'test_loss': float(best_test_loss),  # Add this
-            'test_acc': float(best_test_acc),  # Add this
         },
-        'final_test_metrics': {  # Rename from 'test_metrics'
-            'test_loss': float(final_test_loss),
-            'test_acc': float(final_test_acc),
+        'test_metrics': {
+            'test_loss': float(test_loss),
+            'test_acc': float(test_acc),
         },
         'model_info': {
             'total_parameters': int(total_params),

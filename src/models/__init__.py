@@ -179,4 +179,5 @@ class SimpleCNN(BaseModel):
         return x
 
 
-
+# Import models to register them
+from src.models import ae_res_inception_net  # noqa: F401

@@ -18,11 +18,15 @@ class FilterPipeline(BaseTransform):
     def __init__(self, filters: list[Callable]):
         self.filters = filters if filters else []
     
-    def __call__(self, data: np.ndarray) -> np.ndarray:
+    def __call__(self, data: np.ndarray, series: Optional[str] = None) -> np.ndarray:
         """Apply all filters serially."""
         result = data.copy()
         for filter_fn in self.filters:
-            result = filter_fn(result)
+            # Pass series if transform accepts it, otherwise ignore
+            try:
+                result = filter_fn(result, series=series)
+            except TypeError:
+                result = filter_fn(result)
         return result
 
 
@@ -34,11 +38,15 @@ class NormPipeline(BaseTransform):
     def __init__(self, norms: list[Callable]):
         self.norms = norms if norms else []
     
-    def __call__(self, data: np.ndarray) -> np.ndarray:
+    def __call__(self, data: np.ndarray, series: Optional[str] = None) -> np.ndarray:
         """Apply all norms serially."""
         result = data.copy()
         for norm_fn in self.norms:
-            result = norm_fn(result)
+            # Pass series if transform accepts it, otherwise ignore
+            try:
+                result = norm_fn(result, series=series)
+            except TypeError:
+                result = norm_fn(result)
         return result
 
 
@@ -57,12 +65,16 @@ class PreprocessingPipeline(BaseTransform):
         self.filter_pipeline = FilterPipeline(filters or [])
         self.norm_pipeline = NormPipeline(norms or [])
     
-    def __call__(self, data: np.ndarray) -> np.ndarray:
+    def __call__(self, data: np.ndarray, series: Optional[str] = None) -> np.ndarray:
         """
         Apply transforms serially: filters first, then norms.
+        
+        Args:
+            data: Data to preprocess
+            series: Optional series name for series-aware transforms
         """
-        result = self.filter_pipeline(data)
-        result = self.norm_pipeline(result)
+        result = self.filter_pipeline(data, series=series)
+        result = self.norm_pipeline(result, series=series)
         return result
 
 
@@ -136,8 +148,8 @@ class MinMaxNorm(BaseTransform):
         
         return normalized
 
-class RefBasedNorm(BaseTransform):
-    """Reference-based normalization using mean and std from reference data."""
+class ZScoreNorm(BaseTransform):
+    """Z-score normalization (standardization) using mean and std from reference data."""
     
     def __init__(self, mean: [float], std: [float]):
         """
@@ -188,3 +200,75 @@ class RefBasedNorm(BaseTransform):
         # NumPy automatically broadcasts (channels,) to match (channels, time_steps)
         # Each channel row is normalized independently using its mean/std
         return (data - self.mean[:, np.newaxis]) / self.std[:, np.newaxis]
+
+
+class SeriesZScoreNorm(BaseTransform):
+    """Z-score normalization with series-specific mean and std parameters."""
+    
+    def __init__(self, series_params: dict[str, dict[str, list[float]]]):
+        """
+        Args:
+            series_params: Dictionary mapping series names to normalization parameters.
+                          Format: {
+                              'series_name': {
+                                  'mean': [mean_ch1, mean_ch2, ...],
+                                  'std': [std_ch1, std_ch2, ...]
+                              },
+                              ...
+                          }
+        """
+        self.series_params = {}
+        for series_name, params in series_params.items():
+            mean = np.asarray(params['mean'])
+            std = np.asarray(params['std'])
+            
+            # Validate shapes
+            if mean.ndim > 2 or std.ndim > 2:
+                raise ValueError(f"mean and std must be 1D or 2D arrays for series {series_name}")
+            if mean.shape != std.shape:
+                raise ValueError(f"mean and std must have same shape for series {series_name}")
+            
+            # Handle zero std
+            std = np.where(std == 0, 1.0, std)
+            
+            self.series_params[series_name] = {
+                'mean': mean,
+                'std': std
+            }
+    
+    def __call__(self, data: np.ndarray, series: str) -> np.ndarray:
+        """
+        Normalize data using series-specific mean and std.
+        
+        Args:
+            data: Array of shape (channels, time_steps) to normalize.
+            series: Series name to use for normalization.
+        
+        Returns:
+            Normalized data with same shape as input.
+        """
+        if series not in self.series_params:
+            raise ValueError(
+                f"Series '{series}' not found in normalization parameters. "
+                f"Available: {list(self.series_params.keys())}"
+            )
+        
+        data = np.asarray(data)
+        
+        # Validate data shape
+        if data.ndim != 2:
+            raise ValueError(
+                f"data must be 2D array (channels, time_steps), got shape {data.shape}"
+            )
+        
+        params = self.series_params[series]
+        mean = params['mean']
+        std = params['std']
+        
+        if data.shape[0] != len(mean):
+            raise ValueError(
+                f"Number of channels in data ({data.shape[0]}) must match "
+                f"number of channels in mean/std ({len(mean)}) for series {series}"
+            )
+        
+        return (data - mean[:, np.newaxis]) / std[:, np.newaxis]

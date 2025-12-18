@@ -36,7 +36,10 @@ class OrionAEFrameDataset(Dataset):
 
         # load config
         with open(config_path, 'r') as f:
-            self.config = yaml.safe_load(f)
+            config_raw = yaml.safe_load(f)
+        
+        # Extract dataset config if YAML has 'dataset' as root key
+        self.config = config_raw.get('dataset', config_raw)
 
         self.load_val_label_map = self.config['labels']
         
@@ -68,6 +71,7 @@ class OrionAEFrameDataset(Dataset):
         )
 
         self.num_frames = sum(metadata['num_frames'])
+        self.file_series = metadata['series'].tolist()
         self.file_paths = metadata['file_path'].tolist()
         self.file_frame_offsets = []
         self.file_num_frames = []  # Store num_frames for each file for bounds checking
@@ -171,12 +175,16 @@ class OrionAEFrameDataset(Dataset):
         # Select channels using indices
         return data[:, self.channel_indices]
 
-    def _preprocess_data(self, data: np.ndarray) -> np.ndarray:
+    def _preprocess_data(self, data: np.ndarray, series: Optional[str] = None) -> np.ndarray:
         """
         Preprocesses the data using the configured preprocessing pipeline.
         The pipeline applies filters first, then normalizations, serially.
+
+        Args:
+            data: Data to preprocess
+            series: Optional series name for series-aware transforms
         """
-        return self.preprocessing_pipeline(data)
+        return self.preprocessing_pipeline(data, series=series)
     
     def _extract_features(self, data: np.ndarray) -> dict:
         """
@@ -236,19 +244,21 @@ class OrionAEFrameDataset(Dataset):
         file_index, local_frame_index = self._locate_file_and_frame_index(index)
         file_path = self.file_paths[file_index]
         file_label = self.file_labels[file_index]
+        file_serie = self.file_series[file_index]  # Add this line
 
         # Load raw data for the frame
-        raw_data = self._load_data(file_path)[local_frame_index]  # Shape: (time_steps, num_channels)
+        raw_data = self._load_data(file_path)[local_frame_index]
 
         # Select only configured channels
-        selected_data = self._select_channels(raw_data)  # Shape: (time_steps, len(selected_channels))
+        selected_data = self._select_channels(raw_data)
 
         # Reshape to (channels, time_steps) for model consumption
-        sample_item['raw'] = selected_data.T  # Shape: (channels, time_steps)
+        sample_item['raw'] = selected_data.T
 
         # Preprocess the selected channels (input is now (channels, time_steps))
-        sample_item['preprocessed'] = self._preprocess_data(sample_item['raw'])
+        sample_item['preprocessed'] = self._preprocess_data(sample_item['raw'], series=file_serie)
         sample_item['features'] = self._extract_features(sample_item['preprocessed'])
         sample_item['label'] = file_label
+        sample_item['serie'] = file_serie
 
         return sample_item

@@ -7,7 +7,8 @@ from src.data.transforms.preprocessing import (
     PreprocessingPipeline,
     HighPassFilter,
     MinMaxNorm,
-    RefBasedNorm,
+    ZScoreNorm,
+    SeriesZScoreNorm
 )
 
 
@@ -21,5 +22,6 @@ __all__ = [
     "HighPassFilter",
     # Normalization Transforms
     "MinMaxNorm",
-    "RefBasedNorm",
+    "ZScoreNorm",
+    "SeriesZScoreNorm"
 ]

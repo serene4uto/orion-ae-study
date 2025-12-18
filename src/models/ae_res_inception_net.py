@@ -1,6 +1,6 @@
 import torch
 from torch import nn
-from src.models import BaseModel
+from src.models import BaseModel, register_model
 
 def autopad(k, p=None, d=1):  # kernel, padding, dilation
     """Pad to 'same' shape outputs."""
@@ -173,6 +173,7 @@ class ClassifierHead(BaseModel):
         
         return x
 
+@register_model("ae_res_inception_net")
 class AeResInceptionNet(BaseModel):
     def __init__(
         self,
