@@ -434,7 +434,7 @@ class Trainer:
         for batch in pbar:
 
             # move data to 'device'
-            inputs = batch['preprocessed'].to(self.device)  # (batch_size, channels, time_steps, 1) for Conv2d
+            inputs = batch['preprocessed'].to(self.device)  # (batch_size, channels, 1, time_steps) - Conv2d format
             labels =  batch['label'].to(self.device)
 
             # Forward pass

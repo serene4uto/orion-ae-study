@@ -59,12 +59,12 @@ class DummyModel(BaseModel):
 @register_model("simple_cnn")
 class SimpleCNN(BaseModel):
     """
-    Simple 1D CNN for time series classification.
+    Simple 2D CNN for time series classification.
     
     Uses stride=2 in conv layers for wavelet-like downsampling (filter bank + decimation).
-    Applies global pooling at the end to collapse temporal dimension.
+    Applies global pooling at the end to collapse spatial dimensions.
     
-    Input shape: (batch_size, time_steps, in_channels)
+    Input shape: (batch_size, channels, 1, time_steps) - Conv2d format
     Output shape: (batch_size, num_classes)
     """
     
@@ -73,7 +73,7 @@ class SimpleCNN(BaseModel):
         in_channels: int,
         num_classes: int = 7,
         num_filters: list = None,  # List of filter sizes for each conv layer
-        kernel_sizes: list = None,  # List of kernel sizes for each conv layer
+        kernel_sizes: list = None,  # List of kernel sizes for each conv layer (will be converted to 2D)
         strides: list = None,  # List of strides for each conv layer (for downsampling)
         dropout: float = 0.5,
         global_pool: str = 'avg',  # 'avg' or 'max' for global pooling
@@ -95,34 +95,40 @@ class SimpleCNN(BaseModel):
             raise ValueError("num_filters, kernel_sizes, and strides must have the same length")
         
         # Build convolutional layers with stride-based downsampling (wavelet-like)
+        # Using Conv2d: kernel is (height, width) = (1, kernel_size) for time series
         conv_layers = []
         current_channels = in_channels
         
         for i, (out_channels, kernel_size, stride) in enumerate(zip(num_filters, kernel_sizes, strides)):
+            # Convert 1D kernel size to 2D: (1, kernel_size) for Conv2d
+            kernel_2d = (1, kernel_size)
+            stride_2d = (1, stride)
+            padding_2d = (0, kernel_size // 2)  # No padding in height, same padding in width
+            
             conv_layers.extend([
-                nn.Conv1d(
+                nn.Conv2d(
                     in_channels=current_channels,
                     out_channels=out_channels,
-                    kernel_size=kernel_size,
-                    stride=stride,  # Stride-based downsampling (like DWT decimation)
-                    padding=kernel_size // 2  # Same padding
+                    kernel_size=kernel_2d,
+                    stride=stride_2d,  # Stride-based downsampling (like DWT decimation)
+                    padding=padding_2d
                 ),
-                nn.BatchNorm1d(out_channels),
+                nn.BatchNorm2d(out_channels),
                 nn.ReLU(inplace=True),
             ])
             current_channels = out_channels
         
         self.conv_layers = nn.Sequential(*conv_layers)
         
-        # Global pooling to collapse temporal dimension
+        # Global pooling to collapse spatial dimensions
         if global_pool == 'avg':
-            self.global_pool = nn.AdaptiveAvgPool1d(1)
+            self.global_pool = nn.AdaptiveAvgPool2d(1)  # (batch, channels, 1, 1)
         elif global_pool == 'max':
-            self.global_pool = nn.AdaptiveMaxPool1d(1)
+            self.global_pool = nn.AdaptiveMaxPool2d(1)  # (batch, channels, 1, 1)
         else:
             raise ValueError(f"global_pool must be 'avg' or 'max', got {global_pool}")
         
-        # After global pooling: (batch, channels, 1) -> flatten to (batch, channels)
+        # After global pooling: (batch, channels, 1, 1) -> flatten to (batch, channels)
         # The number of channels is the last num_filters value
         final_channels = num_filters[-1]
         
@@ -151,22 +157,21 @@ class SimpleCNN(BaseModel):
         Forward pass.
         
         Args:
-            x: Input tensor of shape (batch_size, time_steps, channels)
+            x: Input tensor of shape (batch_size, channels, 1, time_steps) from dataset
         
         Returns:
             Output tensor of shape (batch_size, num_classes)
         """
-        # Transpose from (batch, time, channels) to (batch, channels, time) for Conv1d
-        x = x.transpose(1, 2)  # (batch_size, channels, time_steps)
+        # Input is (batch, channels, 1, time_steps) from dataset - ready for Conv2d
         
         # Apply convolutional layers with stride-based downsampling
-        x = self.conv_layers(x)  # (batch_size, final_channels, reduced_time_steps)
+        x = self.conv_layers(x)  # (batch_size, final_channels, 1, reduced_time_steps)
         
-        # Global pooling to collapse temporal dimension
-        x = self.global_pool(x)  # (batch_size, final_channels, 1)
+        # Global pooling to collapse spatial dimensions
+        x = self.global_pool(x)  # (batch_size, final_channels, 1, 1)
         
-        # Flatten: (batch_size, final_channels, 1) -> (batch_size, final_channels)
-        x = x.squeeze(-1)
+        # Flatten: (batch_size, final_channels, 1, 1) -> (batch_size, final_channels)
+        x = x.view(x.size(0), -1)  # Flatten all dimensions except batch
         
         # Apply fully connected layers
         x = self.fc_layers(x)

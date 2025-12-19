@@ -169,7 +169,7 @@ class OrionAEFrameDataset(Dataset):
         
         Returns:
             Data array with only selected channels, shape (time_steps, len(selected_channels))
-            Note: This will be transposed to (channels, time_steps) in __getitem__
+            Note: This format is maintained throughout - (time_steps, channels)
         """
         # Data shape: (time_steps, num_channels)
         # Select channels using indices
@@ -252,11 +252,20 @@ class OrionAEFrameDataset(Dataset):
         # Select only configured channels
         selected_data = self._select_channels(raw_data)
 
-        # Reshape to (channels, time_steps) for model consumption
-        sample_item['raw'] = selected_data.T
+        # Store raw data
+        sample_item['raw'] = selected_data.T  # (channels, time_steps) from _select_channels
 
-        # Preprocess the selected channels (input is now (channels, time_steps))
-        sample_item['preprocessed'] = self._preprocess_data(sample_item['raw'], series=file_serie)
+        # Preprocess the selected channels (input is (channels, time_steps))
+        preprocessed = self._preprocess_data(sample_item['raw'], series=file_serie)
+        
+        # Reshape to (channels, 1, time_steps) for Conv2d compatibility
+        # This will become (batch, channels, 1, time_steps) when batched
+        # Models using Conv1d can reshape/transpose as needed
+        if preprocessed.ndim == 2:
+            # (channels, time_steps) -> (channels, 1, time_steps)
+            preprocessed = preprocessed[:, np.newaxis, :]
+        
+        sample_item['preprocessed'] = preprocessed  # (channels, 1, time_steps)
         sample_item['features'] = self._extract_features(sample_item['preprocessed'])
         sample_item['label'] = file_label
         sample_item['serie'] = file_serie

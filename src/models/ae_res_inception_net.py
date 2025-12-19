@@ -233,6 +233,8 @@ class AeResInceptionNet(BaseModel):
         )
 
     def forward(self, x):
+        # Input is (batch, channels, 1, time_steps) from dataset - ready for Conv2d
+        
         x = self.conv_stem(x)
         
         for block in self.inception_blocks:
