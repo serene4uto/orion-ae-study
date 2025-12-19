@@ -17,6 +17,8 @@ from pathlib import Path
 
 from src.core.trainer import Trainer
 from src.data.dataset import OrionAEFrameDataset
+from src.data.transforms import preprocessing
+from src.data.transforms.preprocessing import PreprocessingPipeline
 from src.models import get_model
 from src.utils import LOGGER
 
@@ -45,20 +47,79 @@ def get_device(device_config):
     return device
 
 
+def create_preprocessing_pipeline(preprocess_config):
+    """
+    Create a PreprocessingPipeline from config.
+    
+    Args:
+        preprocess_config: Dictionary with 'filters' and 'norms' keys.
+                          Each is a list of transform configs with 'type' and 'params'.
+    
+    Returns:
+        PreprocessingPipeline instance
+    """
+    if not preprocess_config:
+        return PreprocessingPipeline()
+    
+    # Build filters
+    filters = []
+    filter_configs = preprocess_config.get('filters', [])
+    for filter_cfg in filter_configs:
+        if isinstance(filter_cfg, dict):
+            transform_type = filter_cfg.get('type')
+            params = filter_cfg.get('params', {})
+            
+            transform_class = getattr(preprocessing, transform_type, None)
+            if transform_class is not None:
+                filters.append(transform_class(**params))
+            else:
+                LOGGER.warning(f"Unknown filter type: {transform_type}. Skipping.")
+        else:
+            LOGGER.warning(f"Invalid filter config format: {filter_cfg}. Expected dict.")
+    
+    # Build norms
+    norms = []
+    norm_configs = preprocess_config.get('norms', [])
+    for norm_cfg in norm_configs:
+        if isinstance(norm_cfg, dict):
+            transform_type = norm_cfg.get('type')
+            params = norm_cfg.get('params', {})
+            
+            transform_class = getattr(preprocessing, transform_type, None)
+            if transform_class is not None:
+                norms.append(transform_class(**params))
+            else:
+                LOGGER.warning(f"Unknown norm type: {transform_type}. Skipping.")
+        else:
+            LOGGER.warning(f"Invalid norm config format: {norm_cfg}. Expected dict.")
+    
+    return PreprocessingPipeline(filters=filters, norms=norms)
+
+
 def create_data_loaders(dataset_config_path, data_path, train_config):
     """Create train and validation data loaders."""
+    # Load dataset config to get preprocessing settings
+    dataset_config = load_config(dataset_config_path)
+    dataset_cfg = dataset_config.get('dataset', dataset_config)
+    preprocess_config = dataset_cfg.get('preprocess', {})
+    
+    # Create preprocessing pipeline from config
+    preprocessing_pipeline = create_preprocessing_pipeline(preprocess_config)
+    
     # Create train dataset
     train_dataset = OrionAEFrameDataset(
         data_path=data_path,
         config_path=dataset_config_path,
-        type='train'
+        type='train',
+        preprocessing_pipeline=preprocessing_pipeline
     )
     
     # Create validation dataset
     val_dataset = OrionAEFrameDataset(
         data_path=data_path,
         config_path=dataset_config_path,
-        type='val'
+        type='val',
+        preprocessing_pipeline=preprocessing_pipeline
     )
     
     # Get data loader parameters from train config
