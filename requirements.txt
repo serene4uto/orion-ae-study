@@ -12,3 +12,4 @@ pyyaml
 matplotlib
 pywavelets
 tensorboard
+mlflow

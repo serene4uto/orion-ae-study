@@ -1,12 +1,88 @@
 train:
-  criterion: 
-    - name: "CrossEntropyLoss"
-      weight: 1.0
-      params: None
-  optimizer:
-    - name: "Adam"
-      lr: 0.001
-      params: None
+  # Device to use for training ('cuda', 'cpu', or 'auto')
   device: "cuda"
+  
+  # Number of training epochs
   num_epochs: 100
-  batch_size: 4
+  
+  # Batch size for training and validation
+  batch_size: 32
+
+  # Number of workers for data loading
+  num_workers: 4
+
+  # Pin memory for data loading
+  pin_memory: true
+  
+  # Loss function configuration (can be a list for multiple losses)
+  criterion:
+    - name: "nn.CrossEntropyLoss"
+      weight: 1.0
+      params:
+        # Optional: specify class weights if needed
+        # weight: [1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0]
+  
+  # Optimizer configuration (support only one optimizer)
+  optimizer:
+    name: "Adam"
+    lr: 0.001
+    params:
+      weight_decay: 0.0001
+      betas: [0.9, 0.999]
+      eps: 1e-8
+  
+  # Optional: Learning rate scheduler configuration
+  scheduler:
+    name: "StepLR"  # or "CosineAnnealingLR", "ReduceLROnPlateau", etc.
+    params:
+      step_size: 30
+      gamma: 0.1
+  
+  # Optional: Regularization
+  l1_reg: 0.0  # L1 regularization coefficient
+
+  # Optional: Early stopping
+  early_stopping:
+    patience: 10
+    min_delta: 0.001
+    monitor: "val/loss" # or "val/acc" 
+
+  # Optional: Checkpointing
+  checkpoint:
+    monitor: "val/loss" # or "val/acc"
+    save_dir: "runs/checkpoints"
+    save_best: true
+    save_every_n_epochs: 10
+
+  # Optional: TensorBoard logging
+  logging:
+    # Enable/disable specific loggers
+    tensorboard:
+      enabled: true
+      log_dir: "runs/tensorboard"
+      experiment_name: null  # null will auto-generate from timestamp
+      log_interval: 10  # Log every N batches (optional)
+      log_graph: true  # Log model computational graph (optional)
+      log_histograms: false  # Log weight histograms (can be expensive)
+      log_images: false  # Log sample images (if applicable)
+    
+    mlflow:
+      enabled: true
+      tracking_uri: null  # null uses default (local ./mlruns), or set to remote URI
+      experiment_name: "orion-ae-study"  # MLflow experiment name
+      run_name: null  # null will auto-generate, or set custom name
+      log_artifacts: true  # Log model checkpoints, configs, etc.
+      log_model: true  # Log the model itself for MLflow model registry
+      tags: {}  # Optional: custom tags as key-value pairs
+      params: {}  # Optional: hyperparameters to log (auto-logged from config)
+      metrics_prefix: ""  # Optional: prefix for metric names (e.g., "train/", "val/")
+    
+    # Common settings
+    log_interval: 10  # Log metrics every N batches (if not specified per logger)
+    log_epoch_interval: 1  # Log metrics every N epochs
+  
+  # Optional: Gradient clipping
+  max_grad_norm: 1.0
+  
+
+  
