@@ -6,7 +6,7 @@ train:
   num_epochs: 100
   
   # Batch size for training and validation
-  batch_size: 32
+  batch_size: 4
 
   # Number of workers for data loading
   num_workers: 4

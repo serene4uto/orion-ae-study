@@ -2,7 +2,7 @@ import torch
 import torch.nn as nn
 import torch.optim as optim
 import numpy as np
-import tqdm
+from tqdm import tqdm
 import os
 from pathlib import Path
 from datetime import datetime
@@ -347,17 +347,49 @@ class Trainer:
         lr = self.optimizer_cfg.get("lr")
         if lr is None:
             raise ValueError("Optimizer configuration must include 'lr' field")
+        # Ensure lr is numeric
+        lr = float(lr)
 
         # Get additional parameters
         optimizer_params = self.optimizer_cfg.get("params", {})
+        if optimizer_params is None:
+            optimizer_params = {}
         if not isinstance(optimizer_params, dict):
             raise ValueError("Optimizer 'params' must be a dictionary")
+        
+        # Convert string numbers to proper types
+        converted_params = {}
+        for key, value in optimizer_params.items():
+            if isinstance(value, str):
+                # Try to convert string to number
+                try:
+                    # Try float first (handles both int and float strings)
+                    if '.' in value or 'e' in value.lower() or 'E' in value:
+                        converted_params[key] = float(value)
+                    else:
+                        # Try int, fallback to float
+                        try:
+                            converted_params[key] = int(value)
+                        except ValueError:
+                            converted_params[key] = float(value)
+                except ValueError:
+                    # If conversion fails, keep as string (might be a valid string param)
+                    converted_params[key] = value
+            elif isinstance(value, list):
+                # Convert list elements if they're strings
+                converted_params[key] = [
+                    float(v) if isinstance(v, str) and ('.' in v or 'e' in v.lower() or 'E' in v) 
+                    else (int(v) if isinstance(v, str) else v)
+                    for v in value
+                ]
+            else:
+                converted_params[key] = value
 
         # Create optimizer with model parameters
         optimizer_instance = optimizer_class(
             self.model.parameters(),
             lr=lr,
-            **optimizer_params
+            **converted_params
         )
 
         return optimizer_instance
@@ -370,6 +402,8 @@ class Trainer:
                 raise ValueError("Loss configuration must include 'name' field")
 
             loss_params = loss_cfg.get("params", {})
+            if loss_params is None:
+                loss_params = {}
             if not isinstance(loss_params, dict):
                 raise ValueError("Loss 'params' must be a dictionary")
 
@@ -495,8 +529,6 @@ class Trainer:
 
 
     def train(self):
-        LOGGER.info("Starting training...")
-        
         # Log hyperparameters to MLflow if enabled
         for logger in self.loggers:
             if isinstance(logger, MLflowLogger):

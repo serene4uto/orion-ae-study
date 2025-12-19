@@ -64,13 +64,13 @@ class SimpleCNN(BaseModel):
     Uses stride=2 in conv layers for wavelet-like downsampling (filter bank + decimation).
     Applies global pooling at the end to collapse temporal dimension.
     
-    Input shape: (batch_size, time_steps, channels)
+    Input shape: (batch_size, time_steps, in_channels)
     Output shape: (batch_size, num_classes)
     """
     
     def __init__(
         self,
-        input_shape: tuple = None,  # (time_steps, channels)
+        in_channels: int,
         num_classes: int = 7,
         num_filters: list = None,  # List of filter sizes for each conv layer
         kernel_sizes: list = None,  # List of kernel sizes for each conv layer
@@ -80,11 +80,6 @@ class SimpleCNN(BaseModel):
         fc_hidden_sizes: list = None,  # List of hidden layer sizes for FC layers, e.g. [128] or [256, 128]
     ):
         super().__init__()
-        
-        if input_shape is None:
-            raise ValueError("input_shape must be provided")
-        
-        time_steps, num_channels = input_shape
         
         # Default architecture
         if num_filters is None:
@@ -101,12 +96,12 @@ class SimpleCNN(BaseModel):
         
         # Build convolutional layers with stride-based downsampling (wavelet-like)
         conv_layers = []
-        in_channels = num_channels
+        current_channels = in_channels
         
         for i, (out_channels, kernel_size, stride) in enumerate(zip(num_filters, kernel_sizes, strides)):
             conv_layers.extend([
                 nn.Conv1d(
-                    in_channels=in_channels,
+                    in_channels=current_channels,
                     out_channels=out_channels,
                     kernel_size=kernel_size,
                     stride=stride,  # Stride-based downsampling (like DWT decimation)
@@ -115,7 +110,7 @@ class SimpleCNN(BaseModel):
                 nn.BatchNorm1d(out_channels),
                 nn.ReLU(inplace=True),
             ])
-            in_channels = out_channels
+            current_channels = out_channels
         
         self.conv_layers = nn.Sequential(*conv_layers)
         
