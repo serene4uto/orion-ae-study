@@ -182,9 +182,9 @@ def create_model(model_config, dataset_config_path, data_path, device):
     if 'num_classes' not in model_params:
         model_params['num_classes'] = num_classes
     
-    # Set in_channels for all models (general approach)
-    if 'in_channels' not in model_params:
-        model_params['in_channels'] = num_channels
+    # Always override in_channels from dataset config (dataset config is source of truth)
+    # This ensures the model matches the actual number of channels in the data
+    model_params['in_channels'] = num_channels
     
     LOGGER.info(f"Creating model: {model_name}")
     LOGGER.info(f"Model parameters: {model_params}")

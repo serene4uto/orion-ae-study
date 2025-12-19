@@ -433,9 +433,9 @@ class Trainer:
         pbar = tqdm(self.train_loader, desc='Training')
         for batch in pbar:
 
-            # move data to 'device'
-            inputs = batch['preprocessed'].to(self.device)  # (batch_size, channels, 1, time_steps) - Conv2d format
-            labels =  batch['label'].to(self.device)
+            # move data to 'device' and convert to float32 (model expects float32, not float64)
+            inputs = batch['preprocessed'].to(self.device, dtype=torch.float32)  # (batch_size, channels, 1, time_steps) - Conv2d format
+            labels = batch['label'].to(self.device)
 
             # Forward pass
             self.optimizer.zero_grad()
@@ -500,7 +500,7 @@ class Trainer:
         with torch.no_grad():  # Disable gradient computation during validation
             for batch in pbar:
 
-                inputs =  batch['preprocessed'].to(self.device)
+                inputs = batch['preprocessed'].to(self.device, dtype=torch.float32)
                 labels = batch['label'].to(self.device)
 
                 outputs = self.model(inputs)
