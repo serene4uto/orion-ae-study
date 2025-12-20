@@ -1,4 +1,4 @@
-# scripts/build_frame_dataset_vibration_cycle.py
+# scripts/build_frame_cycle.py
 """
 Build a dataset of AE frames from raw .mat files using vibration cycle-based segmentation.
 
