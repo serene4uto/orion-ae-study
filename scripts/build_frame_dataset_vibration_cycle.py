@@ -222,31 +222,110 @@ def detect_vibration_cycles_with_peaks(signal, start_with_positive=True, min_cyc
         if max_cycle_length and cycle_length > max_cycle_length:
             continue
         
-        # Find peaks within cycle segments
+        # Find peaks within cycle segments using robust peak detection
         if start_with_positive:
             # First segment: start to mid_zero (should contain positive peak)
             first_segment = signal[start_idx:mid_zero_idx]
-            first_peak_local = np.argmax(first_segment)  # Positive peak
+            first_peak_local = find_robust_peak(first_segment, peak_type='max')
             first_peak_idx = start_idx + first_peak_local
             
             # Second segment: mid_zero to end (should contain negative peak)
             second_segment = signal[mid_zero_idx:end_idx]
-            second_peak_local = np.argmin(second_segment)  # Negative peak
+            second_peak_local = find_robust_peak(second_segment, peak_type='min')
             second_peak_idx = mid_zero_idx + second_peak_local
         else:
             # First segment: start to mid_zero (should contain negative peak)
             first_segment = signal[start_idx:mid_zero_idx]
-            first_peak_local = np.argmin(first_segment)  # Negative peak
+            first_peak_local = find_robust_peak(first_segment, peak_type='min')
             first_peak_idx = start_idx + first_peak_local
             
             # Second segment: mid_zero to end (should contain positive peak)
             second_segment = signal[mid_zero_idx:end_idx]
-            second_peak_local = np.argmax(second_segment)  # Positive peak
+            second_peak_local = find_robust_peak(second_segment, peak_type='max')
             second_peak_idx = mid_zero_idx + second_peak_local
         
         cycles.append((start_idx, first_peak_idx, mid_zero_idx, second_peak_idx, end_idx, cycle_length))
     
     return cycles
+
+def find_robust_peak(
+    segment: np.ndarray,
+    peak_type: str,
+    prominence_percent: float = 0.1,
+    min_distance: int = None
+) -> int:
+    """
+    Find the most prominent peak in a segment, robust to noise and multiple peaks.
+    
+    Uses scipy.signal.find_peaks with prominence filtering to avoid noise spikes
+    and select the most significant peak when multiple peaks exist.
+    
+    Args:
+        segment: 1D array of signal values in the segment
+        peak_type: 'max' for positive peaks, 'min' for negative peaks
+        prominence_percent: Minimum peak prominence as percentage of segment range (default: 0.1 = 10%)
+        min_distance: Minimum distance between peaks in samples (default: None = 1% of segment length)
+    
+    Returns:
+        Local index of the most prominent peak within the segment
+        Falls back to argmax/argmin if no peaks found
+    """
+    if len(segment) == 0:
+        return 0
+    
+    # Calculate prominence threshold
+    segment_range = np.max(segment) - np.min(segment)
+    prominence = segment_range * prominence_percent if segment_range > 0 else 0
+    
+    # Calculate minimum distance if not provided
+    if min_distance is None:
+        min_distance = max(1, int(len(segment) * 0.01))
+    
+    try:
+        if peak_type == 'max':
+            # Find positive peaks
+            peaks, properties = scipy.signal.find_peaks(
+                segment,
+                prominence=prominence,
+                distance=min_distance
+            )
+            
+            if len(peaks) > 0:
+                # Select peak with highest prominence
+                prominences = properties['prominences']
+                best_peak_idx = peaks[np.argmax(prominences)]
+                return best_peak_idx
+            else:
+                # Fallback to argmax if no peaks found
+                return np.argmax(segment)
+        
+        elif peak_type == 'min':
+            # Find negative peaks (invert signal)
+            peaks, properties = scipy.signal.find_peaks(
+                -segment,  # Invert to find minima
+                prominence=prominence,
+                distance=min_distance
+            )
+            
+            if len(peaks) > 0:
+                # Select peak with highest prominence
+                prominences = properties['prominences']
+                best_peak_idx = peaks[np.argmax(prominences)]
+                return best_peak_idx
+            else:
+                # Fallback to argmin if no peaks found
+                return np.argmin(segment)
+        
+        else:
+            raise ValueError(f"peak_type must be 'max' or 'min', got '{peak_type}'")
+    
+    except Exception as e:
+        # Fallback to simple argmax/argmin on error
+        logger.debug(f"Peak detection failed, using fallback: {e}")
+        if peak_type == 'max':
+            return np.argmax(segment)
+        else:
+            return np.argmin(segment)
 
 def preprocess_vibration_signal(
     raw_signal: np.ndarray,
