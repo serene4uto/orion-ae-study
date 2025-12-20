@@ -198,6 +198,71 @@ def detect_vibration_cycles_with_peaks(signal, start_with_positive=True, min_cyc
     
     return cycles
 
+def validate_and_group_cycles(
+    cycle_list: list[tuple],
+    skip: int,
+    cycles_per_frame: int,
+    expected_frame_length: int,
+    tolerance_samples: int = 100
+) -> list[int]:
+    """
+    Group consecutive cycles and validate the grouping.
+    
+    Args:
+        cycle_list: List of cycle tuples (start_idx, ..., end_idx, cycle_length)
+        skip: Number of cycles to skip before creating frames
+        cycles_per_frame: Number of consecutive cycles per frame
+        expected_frame_length: Expected total length in samples (cycles_length * cycles_per_frame)
+        tolerance_samples: Tolerance for length mismatch in samples
+    
+    Returns:
+        List of frame start indices (start_idx of first cycle in each group)
+    """
+    frame_start_idx = []
+    
+    # Iterate through consecutive groups of cycles (step by cycles_per_frame to avoid overlaps)
+    # Example: skip=3, cycles_per_frame=3 -> groups: (3,4,5), (6,7,8), (9,10,11), ...
+    for i in range(skip, len(cycle_list) - cycles_per_frame + 1, cycles_per_frame):
+        # Check if we have enough cycles for a complete group
+        if i + cycles_per_frame > len(cycle_list):
+            break
+        
+        # Verify cycles are consecutive
+        # Cycle tuple: (start_idx, first_peak_idx, mid_zero_idx, second_peak_idx, end_idx, cycle_length)
+        # end_idx is at index [4], start_idx is at index [0]
+        is_consecutive = True
+        for j in range(i, i + cycles_per_frame - 1):
+            if cycle_list[j][4] != cycle_list[j + 1][0]:  # end of cycle j != start of cycle j+1
+                is_consecutive = False
+                break
+        
+        if not is_consecutive:
+            logger.warning(
+                f"Skipping non-consecutive cycle group starting at index {i}: "
+                f"cycle[{i}][4]={cycle_list[i][4]} != cycle[{i+1}][0]={cycle_list[i+1][0]}"
+            )
+            continue
+        
+        # Calculate actual span from first cycle start to last cycle end
+        first_cycle_start = cycle_list[i][0]
+        last_cycle_end = cycle_list[i + cycles_per_frame - 1][4]
+        actual_span = last_cycle_end - first_cycle_start
+        
+        # Verify length matches expected (with tolerance)
+        if abs(actual_span - expected_frame_length) > tolerance_samples:
+            logger.warning(
+                f"Cycle group starting at index {i} has length mismatch: "
+                f"actual={actual_span}, expected={expected_frame_length}, "
+                f"difference={abs(actual_span - expected_frame_length)} samples"
+            )
+            # Continue anyway, but log the warning
+        
+        # Add the start index of the first cycle in the group
+        frame_start_idx.append(first_cycle_start)
+    
+    return frame_start_idx
+
+
 def segment_stream(stream_data: np.ndarray, frame_length: int, frame_start_idx: list[int]) -> np.ndarray:
     """
     Divide continuous stream into fixed-length frames.
@@ -409,27 +474,26 @@ def convert_and_segment_dataset(
                 skip_pos = skip_cycles[0]
                 skip_neg = skip_cycles[1]
                 
-                # Create frames starting at positive cycles
-                for i in range(skip_pos, len(cycles_positive) - cycles_per_frame + 1, cycles_per_frame):
-                    # Start frame at the start of the first cycle in the group
-                    start_idx = cycles_positive[i][0]  # [0] is start_idx from tuple
-                    frame_start_idx.append(start_idx)
+                # Create frames starting at positive cycles (group consecutive cycles)
+                pos_starts = validate_and_group_cycles(
+                    cycles_positive, skip_pos, cycles_per_frame, frame_length
+                )
+                frame_start_idx.extend(pos_starts)
                 
-                # Create frames starting at negative cycles
-                for i in range(skip_neg, len(cycles_negative) - cycles_per_frame + 1, cycles_per_frame):
-                    # Start frame at the start of the first cycle in the group
-                    start_idx = cycles_negative[i][0]  # [0] is start_idx from tuple
-                    frame_start_idx.append(start_idx)
+                # Create frames starting at negative cycles (group consecutive cycles)
+                neg_starts = validate_and_group_cycles(
+                    cycles_negative, skip_neg, cycles_per_frame, frame_length
+                )
+                frame_start_idx.extend(neg_starts)
             else:
                 # Handle single phase (positive or negative)
                 cycle_list = cycles[0]
                 skip = skip_cycles[0]
                 
-                # Create frames starting at cycle boundaries, grouping cycles_per_frame cycles
-                for i in range(skip, len(cycle_list) - cycles_per_frame + 1, cycles_per_frame):
-                    # Start frame at the start of the first cycle in the group
-                    start_idx = cycle_list[i][0]  # [0] is start_idx from tuple
-                    frame_start_idx.append(start_idx)
+                # Create frames starting at cycle boundaries, grouping consecutive cycles_per_frame cycles
+                frame_start_idx = validate_and_group_cycles(
+                    cycle_list, skip, cycles_per_frame, frame_length
+                )
 
             # Segment stream into frames: (num_frames, frame_length, num_channels)
             segmented_data = segment_stream(signal, frame_length, frame_start_idx)
