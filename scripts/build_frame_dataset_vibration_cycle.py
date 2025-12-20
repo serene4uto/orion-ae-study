@@ -201,19 +201,16 @@ def detect_vibration_cycles_with_peaks(signal, start_with_positive=True, min_cyc
 def validate_and_group_cycles(
     cycle_list: list[tuple],
     skip: int,
-    cycles_per_frame: int,
-    expected_frame_length: int,
-    tolerance_samples: int = 100
+    cycles_per_frame: int
 ) -> list[int]:
     """
-    Group consecutive cycles and validate the grouping.
+    Group consecutive cycles and return frame start indices.
+    Frames will be created with fixed length based on user input (cycles_length * cycles_per_frame).
     
     Args:
         cycle_list: List of cycle tuples (start_idx, ..., end_idx, cycle_length)
         skip: Number of cycles to skip before creating frames
         cycles_per_frame: Number of consecutive cycles per frame
-        expected_frame_length: Expected total length in samples (cycles_length * cycles_per_frame)
-        tolerance_samples: Tolerance for length mismatch in samples
     
     Returns:
         List of frame start indices (start_idx of first cycle in each group)
@@ -243,21 +240,9 @@ def validate_and_group_cycles(
             )
             continue
         
-        # Calculate actual span from first cycle start to last cycle end
+        # Use the start index of the first cycle in the group
+        # Frame will be created with fixed length: start_idx + cycles_length * cycles_per_frame
         first_cycle_start = cycle_list[i][0]
-        last_cycle_end = cycle_list[i + cycles_per_frame - 1][4]
-        actual_span = last_cycle_end - first_cycle_start
-        
-        # Verify length matches expected (with tolerance)
-        if abs(actual_span - expected_frame_length) > tolerance_samples:
-            logger.warning(
-                f"Cycle group starting at index {i} has length mismatch: "
-                f"actual={actual_span}, expected={expected_frame_length}, "
-                f"difference={abs(actual_span - expected_frame_length)} samples"
-            )
-            # Continue anyway, but log the warning
-        
-        # Add the start index of the first cycle in the group
         frame_start_idx.append(first_cycle_start)
     
     return frame_start_idx
@@ -476,13 +461,13 @@ def convert_and_segment_dataset(
                 
                 # Create frames starting at positive cycles (group consecutive cycles)
                 pos_starts = validate_and_group_cycles(
-                    cycles_positive, skip_pos, cycles_per_frame, frame_length
+                    cycles_positive, skip_pos, cycles_per_frame
                 )
                 frame_start_idx.extend(pos_starts)
                 
                 # Create frames starting at negative cycles (group consecutive cycles)
                 neg_starts = validate_and_group_cycles(
-                    cycles_negative, skip_neg, cycles_per_frame, frame_length
+                    cycles_negative, skip_neg, cycles_per_frame
                 )
                 frame_start_idx.extend(neg_starts)
             else:
@@ -492,7 +477,7 @@ def convert_and_segment_dataset(
                 
                 # Create frames starting at cycle boundaries, grouping consecutive cycles_per_frame cycles
                 frame_start_idx = validate_and_group_cycles(
-                    cycle_list, skip, cycles_per_frame, frame_length
+                    cycle_list, skip, cycles_per_frame
                 )
 
             # Segment stream into frames: (num_frames, frame_length, num_channels)
