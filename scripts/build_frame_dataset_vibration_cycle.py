@@ -487,6 +487,18 @@ def parse_args():
         default=['A', 'B', 'C', 'D'],
         help='Channels to extract from .mat files (default: A B C D)'
     )
+    parser.add_argument(
+        '--filter-cutoff-hz',
+        type=float,
+        default=1000.0,
+        help='Low-pass filter cutoff frequency in Hz for vibration signal preprocessing (default: 1000.0)'
+    )
+    parser.add_argument(
+        '--filter-order',
+        type=int,
+        default=4,
+        help='Butterworth filter order for vibration signal preprocessing (default: 4)'
+    )
     return parser.parse_args()
 
 
@@ -497,7 +509,9 @@ def convert_and_segment_dataset(
     skip_cycles: list[int],
     cycles_per_frame: int,
     cycles_length: int,
-    channels: list[str]
+    channels: list[str],
+    filter_cutoff_hz: float = 1000.0,
+    filter_order: int = 4
 ):
     """
     Convert raw .mat files to segmented .npy files based on vibration cycles.
@@ -510,6 +524,8 @@ def convert_and_segment_dataset(
         cycles_per_frame: Number of cycles per frame
         cycles_length: Target cycle length in samples
         channels: List of channel names to extract
+        filter_cutoff_hz: Low-pass filter cutoff frequency in Hz for vibration signal preprocessing (default: 1000.0)
+        filter_order: Butterworth filter order for vibration signal preprocessing (default: 4)
     """
     
     # Mapping load string -> (class, value)
@@ -552,8 +568,8 @@ def convert_and_segment_dataset(
             vibrometer_signal = preprocess_vibration_signal(
                 raw_vibrometer,
                 sampling_frequency_hz=SAMPLING_FREQUENCY_HZ,
-                cutoff_frequency_hz=1000.0,
-                filter_order=4
+                cutoff_frequency_hz=filter_cutoff_hz,
+                filter_order=filter_order
             )
             if cycle_start_phase == 'positive':
                 cycles = [detect_vibration_cycles_with_peaks(vibrometer_signal, start_with_positive=True)]
@@ -771,6 +787,8 @@ def main():
     logger.info(f"Channels: {args.channels}")
     logger.info(f"Cycle start phase: {args.cycle_start_phase}")
     logger.info(f"Skip cycles: {args.skip_cycles}")
+    logger.info(f"Filter cutoff frequency: {args.filter_cutoff_hz} Hz")
+    logger.info(f"Filter order: {args.filter_order}")
     
     if not args.input_dir.exists():
         logger.error(f"Input directory does not exist: {args.input_dir}")
@@ -783,7 +801,9 @@ def main():
         skip_cycles=args.skip_cycles,
         cycles_per_frame=args.cycles_per_frame,
         cycles_length=args.cycles_length,
-        channels=args.channels
+        channels=args.channels,
+        filter_cutoff_hz=args.filter_cutoff_hz,
+        filter_order=args.filter_order
     )
 
 
