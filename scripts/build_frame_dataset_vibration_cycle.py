@@ -198,6 +198,39 @@ def detect_vibration_cycles_with_peaks(signal, start_with_positive=True, min_cyc
     
     return cycles
 
+def preprocess_vibration_signal(
+    raw_signal: np.ndarray,
+    sampling_frequency_hz: float = SAMPLING_FREQUENCY_HZ,
+    cutoff_frequency_hz: float = 1000.0,
+    filter_order: int = 4
+) -> np.ndarray:
+    """
+    Preprocess vibration signal for cycle detection/alignment.
+    
+    Applies a low-pass Butterworth filter to remove high-frequency noise
+    while preserving the vibration cycle structure.
+    
+    Args:
+        raw_signal: Raw vibration signal (1D array)
+        sampling_frequency_hz: Sampling frequency in Hz (default: 5e6)
+        cutoff_frequency_hz: Low-pass filter cutoff frequency in Hz (default: 1000.0)
+        filter_order: Butterworth filter order (default: 4)
+    
+    Returns:
+        Filtered vibration signal (1D array)
+    """
+    # Calculate normalized cutoff frequency (Nyquist normalized)
+    nyquist = sampling_frequency_hz / 2
+    normal_cutoff = cutoff_frequency_hz / nyquist
+    
+    # Design Butterworth low-pass filter
+    b, a = scipy.signal.butter(filter_order, normal_cutoff, btype='low', analog=False)
+    
+    # Apply zero-phase filtering (filtfilt) to avoid phase distortion
+    filtered_signal = scipy.signal.filtfilt(b, a, raw_signal)
+    
+    return filtered_signal
+
 def validate_and_group_cycles(
     cycle_list: list[tuple],
     skip: int,
@@ -374,9 +407,6 @@ def convert_and_segment_dataset(
     # Get all measurement files
     data_files = get_measurement_files(source_root)
     logger.info(f"Found {len(data_files)} measurement files")
-
-    nyquist = SAMPLING_FREQUENCY_HZ / 2
-    normal_cutoff = 1000 / nyquist
     
     # Convert and segment
     for mat_path in tqdm(data_files, desc="Converting & Segmenting"):
@@ -388,9 +418,14 @@ def convert_and_segment_dataset(
             # Load .mat
             mat = scipy.io.loadmat(mat_path)
 
-            # process vibrometer signal
-            b, a = scipy.signal.butter(4, normal_cutoff, btype='low', analog=False)
-            vibrometer_signal = scipy.signal.filtfilt(b, a, mat['D'].squeeze())
+            # Preprocess vibrometer signal for cycle detection/alignment
+            raw_vibrometer = mat['D'].squeeze()
+            vibrometer_signal = preprocess_vibration_signal(
+                raw_vibrometer,
+                sampling_frequency_hz=SAMPLING_FREQUENCY_HZ,
+                cutoff_frequency_hz=1000.0,
+                filter_order=4
+            )
             if cycle_start_phase == 'positive':
                 cycles = [detect_vibration_cycles_with_peaks(vibrometer_signal, start_with_positive=True)]
                 # cycles_lengths_avg = np.mean([np.mean([c[5] for c in cycle]) for cycle in cycles])
