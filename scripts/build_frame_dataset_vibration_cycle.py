@@ -1,17 +1,50 @@
-# scripts/build_frame_dataset.py
+# scripts/build_frame_dataset_vibration_cycle.py
 """
-Build a dataset of AE frames from raw .mat files.
+Build a dataset of AE frames from raw .mat files using vibration cycle-based segmentation.
 
 Each .mat file is a 1-second chunk from a continuous recorded stream at a specific load.
 The dataset is built by:
 1. Loading each 1-second chunk (.mat file)
-2. Segmenting each chunk into frames of a fixed duration
-3. Saving all frames from a chunk as a single .npy file
+2. Preprocessing the laser vibrometer signal (channel D) with a low-pass Butterworth filter
+   to remove high-frequency noise while preserving vibration cycle structure
+3. Detecting vibration cycles in the preprocessed vibrometer signal using zero-crossing detection
+4. Aligning frame boundaries to detected cycle start points (phase alignment)
+5. Creating frames with fixed length (cycles_length * cycles_per_frame samples)
+6. Saving all frames from a chunk as a single .npy file
+
+Laser vibrometer signal preprocessing:
+- Applies a low-pass Butterworth filter (default: 1000 Hz cutoff, 4th order)
+- Uses zero-phase filtering (filtfilt) to avoid phase distortion
+- Why needed:
+  * Raw signal is sampled at 5 MHz, capturing high-frequency noise and artifacts
+  * Actual vibration frequency is much lower (~120 Hz), so high-frequency content is noise
+  * Noise causes false zero-crossings and incorrect cycle boundary detection
+  * Filtering removes noise while preserving the fundamental vibration cycle structure
+  * Zero-phase filtering ensures accurate cycle boundary detection without phase shifts
+
+Key difference from fixed-duration segmentation:
+- Frames are phase-aligned to vibration cycles rather than arbitrary time windows
+- This ensures consistent phase relationship across frames, which is important for
+  analyzing vibration-related acoustic emission patterns that are synchronized with
+  the mechanical cycle
+
+Why fixed frame length:
+- Machine learning models require consistent input dimensions for batch processing
+- Fixed-length frames enable efficient tensor operations and model training
+- Ensures all frames have identical shape regardless of minor cycle length variations
+
+Why accept frame length mismatch with detected cycle boundaries:
+- Vibration frequency may vary slightly due to mechanical conditions, but the phase
+  alignment (starting at cycle boundaries) is more critical than exact cycle length matching
+- Fixed frame length ensures consistent dataset structure for ML pipelines
+- Minor boundary mismatches (frames extending slightly beyond or cutting short of
+  detected cycles) are acceptable as long as frames start at the correct phase, which
+  preserves the phase-synchronized relationship between vibration and AE signals
 
 The metadata is saved as a .csv file and a .json file.
 
 The dataset is saved in the following structure:
-- data/raw/segmented/
+- data/raw/segmented_cycles_*/
   - data/
     - file_id.npy  (contains all frames from one 1-second chunk)
     - file_id.npy
