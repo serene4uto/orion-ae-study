@@ -132,7 +132,7 @@ def find_zero_crossings(
     
     Handles:
     - DC offset: Removes DC component before detection
-    - Noise: Uses threshold to filter noise-induced false crossings
+    - Noise: Uses threshold to filter noise-induced false crossings (optional, disabled by default)
     - Missing crossings: Returns empty array if no valid crossings found
     
     Args:
@@ -140,10 +140,12 @@ def find_zero_crossings(
         direction: 'positive' (negative to positive), 'negative' (positive to negative), 
                    or 'both' (all crossings)
         remove_dc_offset: If True, subtract mean to remove DC offset (default: True)
-        threshold: Minimum signal magnitude change required for valid crossing (default: None = auto)
-                   If None, uses 1% of signal range
-        hysteresis: Minimum distance between consecutive crossings to avoid noise (default: None)
-                    If None, uses 0.1% of signal length
+        threshold: Minimum signal magnitude change required for valid crossing (default: None = disabled)
+                   If None, no threshold filtering is applied
+                   If provided, uses this value (or 1% of signal range if > 0)
+        hysteresis: Minimum distance between consecutive crossings to avoid noise (default: None = disabled)
+                    If None, no hysteresis filtering is applied
+                    If provided, uses this value (or 0.1% of signal length if > 0)
     
     Returns:
         Array of indices where zero-crossings occur
@@ -154,26 +156,43 @@ def find_zero_crossings(
     if remove_dc_offset:
         signal = signal - np.mean(signal)
     
-    # Auto-calculate threshold if not provided (1% of signal range)
-    if threshold is None:
-        signal_range = np.max(signal) - np.min(signal)
-        threshold = signal_range * 0.01 if signal_range > 0 else 0
+    # Threshold filtering: disabled by default
+    use_threshold = False
+    if threshold is not None and threshold > 0:
+        use_threshold = True
+    elif threshold is None:
+        # Auto-calculate threshold if explicitly requested (backward compatibility)
+        # But by default, we don't use threshold
+        use_threshold = False
     
-    # Auto-calculate hysteresis if not provided (0.1% of signal length)
-    if hysteresis is None:
-        hysteresis = max(1, int(len(signal) * 0.001))
+    # Hysteresis filtering: disabled by default
+    use_hysteresis = False
+    if hysteresis is not None and hysteresis > 0:
+        use_hysteresis = True
+    elif hysteresis is None:
+        # Auto-calculate hysteresis if explicitly requested (backward compatibility)
+        # But by default, we don't use hysteresis
+        use_hysteresis = False
     
     # Find positive-going crossings: negative before, positive after
-    # With threshold: require significant change to avoid noise
-    positive_mask = (signal[:-1] < -threshold) & (signal[1:] > threshold)
+    if use_threshold:
+        # With threshold: require significant change to avoid noise
+        positive_mask = (signal[:-1] < -threshold) & (signal[1:] > threshold)
+    else:
+        # Without threshold: standard zero-crossing detection
+        positive_mask = (signal[:-1] < 0) & (signal[1:] > 0)
     positive_crossings = np.where(positive_mask)[0]
     
     # Find negative-going crossings: positive before, negative after
-    negative_mask = (signal[:-1] > threshold) & (signal[1:] < -threshold)
+    if use_threshold:
+        negative_mask = (signal[:-1] > threshold) & (signal[1:] < -threshold)
+    else:
+        # Without threshold: standard zero-crossing detection
+        negative_mask = (signal[:-1] > 0) & (signal[1:] < 0)
     negative_crossings = np.where(negative_mask)[0]
     
     # Apply hysteresis: remove crossings that are too close together (likely noise)
-    if hysteresis > 0 and len(positive_crossings) > 0:
+    if use_hysteresis and len(positive_crossings) > 0:
         # Keep only crossings that are at least 'hysteresis' samples apart
         filtered_positive = [positive_crossings[0]]
         for crossing in positive_crossings[1:]:
@@ -181,7 +200,7 @@ def find_zero_crossings(
                 filtered_positive.append(crossing)
         positive_crossings = np.array(filtered_positive)
     
-    if hysteresis > 0 and len(negative_crossings) > 0:
+    if use_hysteresis and len(negative_crossings) > 0:
         filtered_negative = [negative_crossings[0]]
         for crossing in negative_crossings[1:]:
             if crossing - filtered_negative[-1] >= hysteresis:
@@ -640,9 +659,31 @@ def convert_and_segment_dataset(
                     continue
             
             logger.debug(f"Using cycle length: {cycles_length} samples ({cycles_length * 1000 / SAMPLING_FREQUENCY_HZ:.2f} ms)")
+            
+            # Calculate actual detected cycle lengths
+            if cycle_start_phase == 'both':
+                # For both phases, calculate mean from both
+                detected_lengths_pos = [c[5] for c in cycles[0]]  # cycle_length is at index 5
+                detected_lengths_neg = [c[5] for c in cycles[1]]
+                detected_lengths = detected_lengths_pos + detected_lengths_neg
+            else:
+                detected_lengths = [c[5] for c in cycles[0]]
+            
+            mean_detected_cycle_length = np.mean(detected_lengths) if len(detected_lengths) > 0 else cycles_length
+            std_detected_cycle_length = np.std(detected_lengths) if len(detected_lengths) > 0 else 0
+            
+            # Frame duration based on fixed cycles_length (for frame creation)
             frame_length = cycles_length * cycles_per_frame
             frame_ms = frame_length * 1000 / SAMPLING_FREQUENCY_HZ
-            logger.info(f"Frame duration: {frame_ms:.2f} ms")
+            
+            # Frame duration based on detected cycle length (for information)
+            detected_frame_length = mean_detected_cycle_length * cycles_per_frame
+            detected_frame_ms = detected_frame_length * 1000 / SAMPLING_FREQUENCY_HZ
+            
+            logger.info(
+                f"Frame duration: {frame_ms:.2f} ms (fixed, {cycles_length} samples/cycle) | "
+                f"Detected: {detected_frame_ms:.2f} ms (mean {mean_detected_cycle_length:.0f}±{std_detected_cycle_length:.0f} samples/cycle)"
+            )
 
             # Stack selected channels: (N, num_channels)
             signal = np.column_stack([
