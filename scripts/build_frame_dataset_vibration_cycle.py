@@ -87,23 +87,73 @@ def extract_timestamp(filename: str) -> str:
     time_part = ':'.join(timestamp_parts[3:])  # HH:MM:SS
     return f"{date_part} {time_part}"
 
-def find_zero_crossings(signal, direction='both'):
+def find_zero_crossings(
+    signal, 
+    direction='both',
+    remove_dc_offset=True,
+    threshold=None,
+    hysteresis=None
+):
     """
-    Find zero-crossing indices in a signal.
+    Find zero-crossing indices in a signal with improved robustness.
+    
+    Handles:
+    - DC offset: Removes DC component before detection
+    - Noise: Uses threshold to filter noise-induced false crossings
+    - Missing crossings: Returns empty array if no valid crossings found
     
     Args:
         signal: 1D array of signal values
         direction: 'positive' (negative to positive), 'negative' (positive to negative), 
                    or 'both' (all crossings)
+        remove_dc_offset: If True, subtract mean to remove DC offset (default: True)
+        threshold: Minimum signal magnitude change required for valid crossing (default: None = auto)
+                   If None, uses 1% of signal range
+        hysteresis: Minimum distance between consecutive crossings to avoid noise (default: None)
+                    If None, uses 0.1% of signal length
     
     Returns:
         Array of indices where zero-crossings occur
     """
-    # Check for positive-going crossings: negative before, positive after
-    positive_crossings = np.where((signal[:-1] < 0) & (signal[1:] > 0))[0]
+    signal = signal.copy()  # Don't modify original
     
-    # Check for negative-going crossings: positive before, negative after
-    negative_crossings = np.where((signal[:-1] > 0) & (signal[1:] < 0))[0]
+    # Remove DC offset
+    if remove_dc_offset:
+        signal = signal - np.mean(signal)
+    
+    # Auto-calculate threshold if not provided (1% of signal range)
+    if threshold is None:
+        signal_range = np.max(signal) - np.min(signal)
+        threshold = signal_range * 0.01 if signal_range > 0 else 0
+    
+    # Auto-calculate hysteresis if not provided (0.1% of signal length)
+    if hysteresis is None:
+        hysteresis = max(1, int(len(signal) * 0.001))
+    
+    # Find positive-going crossings: negative before, positive after
+    # With threshold: require significant change to avoid noise
+    positive_mask = (signal[:-1] < -threshold) & (signal[1:] > threshold)
+    positive_crossings = np.where(positive_mask)[0]
+    
+    # Find negative-going crossings: positive before, negative after
+    negative_mask = (signal[:-1] > threshold) & (signal[1:] < -threshold)
+    negative_crossings = np.where(negative_mask)[0]
+    
+    # Apply hysteresis: remove crossings that are too close together (likely noise)
+    if hysteresis > 0 and len(positive_crossings) > 0:
+        # Keep only crossings that are at least 'hysteresis' samples apart
+        filtered_positive = [positive_crossings[0]]
+        for crossing in positive_crossings[1:]:
+            if crossing - filtered_positive[-1] >= hysteresis:
+                filtered_positive.append(crossing)
+        positive_crossings = np.array(filtered_positive)
+    
+    if hysteresis > 0 and len(negative_crossings) > 0:
+        filtered_negative = [negative_crossings[0]]
+        for crossing in negative_crossings[1:]:
+            if crossing - filtered_negative[-1] >= hysteresis:
+                filtered_negative.append(crossing)
+        negative_crossings = np.array(filtered_negative)
     
     if direction == 'positive':
         return positive_crossings
