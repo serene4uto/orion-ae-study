@@ -3,7 +3,7 @@ train:
   device: "cuda"
   
   # Number of training epochs
-  num_epochs: 100
+  num_epochs: 3
   
   # Batch size for training and validation
   batch_size: 4

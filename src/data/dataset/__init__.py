@@ -94,12 +94,25 @@ class BaseDataset(Dataset, ABC):
         """
         Filters the metadata DataFrame according to the dataset split configuration.
         
-        This method selects the appropriate subset of the data for 'train', 'val', 'test', or 'all' sets 
-        based on the configuration file.
-        - For type 'all', it returns all metadata without any filtering.
-        - For type 'test', it performs a serie-based split using the series listed in config['splits']['test'].
-        - For 'train' or 'val', it excludes test series and splits based on either chunk index or series index, 
-          depending on config['splits']['train_val']['type'] ('chunk-based' or 'serie-based').
+        Supports two formats:
+        
+        1. New format (per-series, per-split chunks):
+           splits:
+             train:
+               'B': [0,1,2,3,4,5,6,7,8,9]
+               'C': [0,1,2,3,4,5,6,7,8,9]
+             val:
+               'B': [8,9]
+             test:
+               'F': [0,1,2,3,4,5,6,7,8,9]
+        
+        2. Old format (backward compatibility):
+           splits:
+             train_val:
+               type: chunk-based  # or serie-based
+               train: [0,1,2,3,4,5,6,7]
+               val: [8,9]
+             test: ['F']
         
         Args:
             metadata: Full metadata DataFrame
@@ -113,34 +126,98 @@ class BaseDataset(Dataset, ABC):
         if type == 'all':
             return metadata
         
-        # Handle test split (always serie-based)
-        if type == 'test':
-            return metadata[metadata['series'].isin(config['splits']['test'])]
+        splits_config = config.get('splits', {})
         
-        # Exclude test series for train/val splits
-        metadata = metadata[~metadata['series'].isin(config['splits']['test'])]
+        # Check if using new format (has 'train', 'val', 'test' as top-level keys with series dicts)
+        # New format: splits['train'] is a dict with series as keys
+        # Old format: splits['train_val'] exists or splits['test'] is a list
+        is_new_format = (
+            type in splits_config and 
+            isinstance(splits_config.get(type), dict)
+        )
         
-        # Get train_val config
-        train_val_config = config['splits']['train_val']
-        split_type = train_val_config['type']
+        if is_new_format:
+            # New format: per-series, per-split chunk selection
+            split_config = splits_config[type]
+            
+            if not isinstance(split_config, dict):
+                raise ValueError(
+                    f"Invalid split config for type '{type}'. "
+                    f"Expected dict with series as keys, got {type(split_config)}"
+                )
+            
+            # Build filter conditions: (series='B' AND chunk in [0,1,2,...]) OR (series='C' AND chunk in [0,1,2,...]) ...
+            conditions = []
+            for series, chunks in split_config.items():
+                if not isinstance(chunks, list):
+                    raise ValueError(
+                        f"Invalid chunks for series '{series}' in '{type}' split. "
+                        f"Expected list, got {type(chunks)}"
+                    )
+                # Filter: series matches AND chunk is in the list
+                series_condition = (metadata['series'] == series) & (metadata['chunk'].isin(chunks))
+                conditions.append(series_condition)
+            
+            if not conditions:
+                # No conditions means no data for this split
+                return metadata.iloc[0:0]  # Return empty DataFrame with same structure
+            
+            # Combine all conditions with OR
+            combined_condition = conditions[0]
+            for condition in conditions[1:]:
+                combined_condition = combined_condition | condition
+            
+            return metadata[combined_condition]
         
-        # Determine column and values based on split type and dataset type
-        if split_type == 'chunk-based':
-            column = 'chunk'
-        elif split_type == 'serie-based':
-            column = 'series'
         else:
-            raise ValueError(f"Invalid split type: {split_type}")
-        
-        # Get the values to filter by
-        if type == 'train':
-            values = train_val_config['train']
-        elif type == 'val':
-            values = train_val_config['val']
-        else:
-            raise ValueError(f"Invalid dataset type: {type}")
-        
-        return metadata[metadata[column].isin(values)]
+            # Old format: backward compatibility
+            # Handle test split (always serie-based)
+            if type == 'test':
+                test_config = splits_config.get('test', [])
+                if isinstance(test_config, list):
+                    return metadata[metadata['series'].isin(test_config)]
+                else:
+                    raise ValueError(
+                        f"Invalid test split config. Expected list of series, got {type(test_config)}"
+                    )
+            
+            # Exclude test series for train/val splits
+            test_config = splits_config.get('test', [])
+            if isinstance(test_config, list):
+                metadata = metadata[~metadata['series'].isin(test_config)]
+            
+            # Get train_val config
+            train_val_config = splits_config.get('train_val', {})
+            if not train_val_config:
+                raise ValueError(
+                    "Old format requires 'train_val' config in splits. "
+                    "If using new format, ensure splits have 'train', 'val', 'test' as dict keys."
+                )
+            
+            split_type = train_val_config.get('type')
+            if not split_type:
+                raise ValueError("train_val config must have 'type' field ('chunk-based' or 'serie-based')")
+            
+            # Determine column and values based on split type and dataset type
+            if split_type == 'chunk-based':
+                column = 'chunk'
+            elif split_type == 'serie-based':
+                column = 'series'
+            else:
+                raise ValueError(f"Invalid split type: {split_type}. Must be 'chunk-based' or 'serie-based'")
+            
+            # Get the values to filter by
+            if type == 'train':
+                values = train_val_config.get('train')
+            elif type == 'val':
+                values = train_val_config.get('val')
+            else:
+                raise ValueError(f"Invalid dataset type: {type}")
+            
+            if values is None:
+                raise ValueError(f"train_val config must have '{type}' field")
+            
+            return metadata[metadata[column].isin(values)]
 
     def _build_file_labels(self, metadata: pd.DataFrame, load_val_label_map: dict) -> tuple[list, list]:
         """
