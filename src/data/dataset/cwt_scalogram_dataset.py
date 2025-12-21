@@ -140,7 +140,7 @@ class CWTScalogramDataset(BaseDataset):
             index: Global frame index in the dataset
             
         Returns:
-            Dictionary with 'features', 'label', and 'serie' keys
+            Dictionary with 'final' (model input), 'label', 'serie', and optionally 'features' keys
         """
         # Locate file index where the frame is located
         file_index, local_frame_index = self._locate_file_and_frame_index(index)
@@ -179,16 +179,35 @@ class CWTScalogramDataset(BaseDataset):
             )
         
         # Build sample item
-        # If frame_features is a dict, merge it with other fields
-        # Otherwise, use 'features' key
+        # Extract the main feature to put under 'final' key (model input)
         if isinstance(frame_features, dict):
-            sample_item = frame_features.copy()
-            sample_item['label'] = file_label
-            sample_item['serie'] = file_serie
-        else:
-            # Single feature array - use 'features' key
+            # Determine which feature should be 'final' (model input)
+            # Priority: CWTScalogramTransform > first feature if only one > raise error if multiple
+            if 'CWTScalogramTransform' in frame_features:
+                final_feature = frame_features['CWTScalogramTransform']
+            elif len(frame_features) == 1:
+                # Only one feature - use it
+                final_feature = list(frame_features.values())[0]
+            else:
+                # Multiple features - raise error to force explicit choice
+                available_features = list(frame_features.keys())
+                raise ValueError(
+                    f"Multiple features found in dataset: {available_features}. "
+                    f"Please specify which feature should be used as model input by adding 'CWTScalogramTransform' key, "
+                    f"or modify dataset to select the desired feature."
+                )
+            
+            # Create sample item with 'final' key for model input
+            # Only include 'final' key, not individual feature keys
             sample_item = {
-                'features': frame_features,  # Pre-computed CWT scalogram features
+                'final': final_feature,  # Final processed data ready for model
+                'label': file_label,
+                'serie': file_serie,
+            }
+        else:
+            # Single feature array (not in dict) - use it as 'final'
+            sample_item = {
+                'final': frame_features,  # Final processed data ready for model
                 'label': file_label,
                 'serie': file_serie,
             }

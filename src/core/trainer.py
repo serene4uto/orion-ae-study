@@ -434,7 +434,7 @@ class Trainer:
         for batch in pbar:
 
             # move data to 'device' and convert to float32 (model expects float32, not float64)
-            inputs = batch['preprocessed'].to(self.device, dtype=torch.float32)  # (batch_size, channels, 1, time_steps) - Conv2d format
+            inputs = batch['final'].to(self.device, dtype=torch.float32)  # (batch_size, channels, 1, time_steps) or (batch_size, channels, height, width) for images
             labels = batch['label'].to(self.device)
 
             # Forward pass
@@ -500,7 +500,7 @@ class Trainer:
         with torch.no_grad():  # Disable gradient computation during validation
             for batch in pbar:
 
-                inputs = batch['preprocessed'].to(self.device, dtype=torch.float32)
+                inputs = batch['final'].to(self.device, dtype=torch.float32)
                 labels = batch['label'].to(self.device)
 
                 outputs = self.model(inputs)
@@ -546,7 +546,7 @@ class Trainer:
                 # Try to infer input shape from first batch
                 try:
                     sample_batch = next(iter(self.train_loader))
-                    sample_input = sample_batch['preprocessed']
+                    sample_input = sample_batch['final']
                     input_shape = sample_input.shape[1:]  # Remove batch dimension
                     logger.log_model_graph(self.model, input_shape)
                 except Exception as e:
