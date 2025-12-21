@@ -50,6 +50,10 @@ class POM1bLoss(nn.Module):
         """
         Compute POM1b ordinal loss.
         
+        POM1b loss formula:
+        L = - sum_{i} sum_{l in {-1,0,1}} log P_i(k-l)
+        where k = targets[i] and P_i is the probability distribution for sample i
+        
         Args:
             logits: Network output before softmax [batch_size, num_classes]
             targets: Ground truth class labels [batch_size] with values 0 to num_classes-1
@@ -59,27 +63,21 @@ class POM1bLoss(nn.Module):
         """
         # Convert logits to probabilities
         probs = F.softmax(logits, dim=1)  # [batch_size, num_classes]
+        batch_size = logits.size(0)
         
-        batch_size = logits.shape[0]
         loss = 0.0
-        
         for i in range(batch_size):
-            true_class = targets[i].item()
+            k = targets[i].item()
             
-            # Collect probabilities for adjacent classes: {y-1, y, y+1}
-            adjacent_probs = []
+            # Collect log P_i(k-l) for l in {-1,0,1} within bounds
+            log_terms = []
+            for l in (-1, 0, 1):
+                cls = k - l
+                if 0 <= cls < self.num_classes:
+                    log_terms.append(torch.log(probs[i, cls] + self.eps))
             
-            for offset in [-1, 0, 1]:
-                class_idx = true_class + offset
-                # Handle boundaries
-                if 0 <= class_idx < self.num_classes:
-                    adjacent_probs.append(probs[i, class_idx])
-            
-            # Sum probabilities on relevant classes
-            total_prob = sum(adjacent_probs)
-            
-            # Add to loss: -log(sum of adjacent probabilities)
-            loss += -torch.log(total_prob + self.eps)  # epsilon for numerical stability
+            # Sum log terms: -sum(log(P)) = -log(prod(P))
+            loss += -sum(log_terms)
         
         return loss / batch_size
 
