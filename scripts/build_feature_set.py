@@ -198,10 +198,29 @@ def save_features_dataset(
         save_file_path = data_dir / f"{original_filename}_features.npy"
         np.save(save_file_path, file_features, allow_pickle=True)
     
-    # Copy metadata and dataset_info
+    # Copy metadata
     shutil.copy(dataset.data_path / "metadata.csv", output_dir / "metadata.csv")
+    
+    # Load and update dataset_info.json with selected channels
     if (dataset.data_path / "dataset_info.json").exists():
-        shutil.copy(dataset.data_path / "dataset_info.json", output_dir / "dataset_info.json")
+        with open(dataset.data_path / "dataset_info.json", 'r') as f:
+            dataset_info = json.load(f)
+        
+        # Update channel information based on selected channels from dataset config
+        # Get selected channels from dataset (OrionAEFrameDataset has selected_channels attribute)
+        if hasattr(dataset, 'selected_channels'):
+            dataset_info['channel_names'] = dataset.selected_channels
+            dataset_info['num_channels'] = len(dataset.selected_channels)
+        else:
+            # Fallback: if dataset doesn't have selected_channels, keep original
+            print(f"Warning: Dataset does not have 'selected_channels' attribute. "
+                  f"Keeping original channel_names from dataset_info.json")
+        
+        # Save updated dataset_info.json
+        with open(output_dir / "dataset_info.json", 'w') as f:
+            json.dump(dataset_info, f, indent=2)
+    else:
+        print(f"Warning: dataset_info.json not found at {dataset.data_path / 'dataset_info.json'}")
     
     # Save feature info
     feature_info = {

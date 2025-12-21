@@ -1,0 +1,8 @@
+model:
+  model_name: efficientnet_b5
+  params:
+    num_classes: 7                     # Number of output classes
+    pretrained: true                   # Use pretrained ImageNet weights
+    dropout: 0.5                       # Dropout rate for classifier head
+    fc_hidden_sizes: [128]             # FC hidden layer sizes, e.g. [128] or [256, 128]
+

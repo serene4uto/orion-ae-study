@@ -239,7 +239,9 @@ def create_model(model_config, dataset_config_path, data_path, device):
     
     # Always override in_channels from dataset config (dataset config is source of truth)
     # This ensures the model matches the actual number of channels in the data
-    model_params['in_channels'] = num_channels
+    # Only set in_channels if it's already defined in model_params (model accepts it)
+    if 'in_channels' in model_params:
+        model_params['in_channels'] = num_channels
     
     LOGGER.info(f"Creating model: {model_name}")
     LOGGER.info(f"Model parameters: {model_params}")

@@ -1,5 +1,6 @@
 from pathlib import Path
 from typing import Optional
+import json
 
 import numpy as np
 
@@ -16,7 +17,7 @@ class CWTScalogramDataset(BaseDataset):
     
     Expected feature format:
     - Each file contains features for multiple frames
-    - Shape: (num_frames, channels, height, width, 3) or (num_frames, channels, height, width)
+    - Shape: (channels, height, width, 3) for multi-channel features
     - Features are pre-computed CWT scalograms (RGB images typically 224x224x3)
     """
 
@@ -36,6 +37,51 @@ class CWTScalogramDataset(BaseDataset):
         """
         # Initialize base class (handles config, metadata filtering, label building)
         super().__init__(data_path, config_path, type)
+        
+        # Load dataset_info.json to get channel names and order
+        dataset_info_path = self.data_path / 'dataset_info.json'
+        if not dataset_info_path.exists():
+            raise FileNotFoundError(
+                f"dataset_info.json not found at {dataset_info_path}. "
+                f"This file is required to determine channel order."
+            )
+        
+        with open(dataset_info_path, 'r') as f:
+            dataset_info = json.load(f)
+        
+        # Get channel names from dataset_info.json (original order)
+        self.available_channels = dataset_info.get('channel_names', [])
+        if not self.available_channels:
+            raise ValueError(
+                f"dataset_info.json does not contain 'channel_names' field. "
+                f"Available keys: {list(dataset_info.keys())}"
+            )
+        
+        # Get selected channels from config and validate
+        selected_channels = self.config.get('channels', self.available_channels)
+        if not isinstance(selected_channels, list):
+            raise ValueError(f"channels in config must be a list, got {type(selected_channels)}")
+        
+        # Validate that all selected channels exist in available channels
+        invalid_channels = [ch for ch in selected_channels if ch not in self.available_channels]
+        if invalid_channels:
+            raise ValueError(
+                f"Invalid channels in config: {invalid_channels}. "
+                f"Available channels from dataset_info.json: {self.available_channels}"
+            )
+        
+        # Only support single channel selection for now (as per user request)
+        if len(selected_channels) != 1:
+            raise ValueError(
+                f"CWTScalogramDataset currently supports selecting exactly 1 channel, "
+                f"got {len(selected_channels)} channels: {selected_channels}. "
+                f"Please specify a single channel in the config, e.g., channels: ['A']"
+            )
+        
+        self.selected_channel = selected_channels[0]
+        
+        # Create channel index for fast indexing (maps channel name to its index in available_channels)
+        self.selected_channel_index = self.available_channels.index(self.selected_channel)
         
         # Calculate frame offsets and counts (frame-based dataset logic, similar to OrionAEFrameDataset)
         self.num_frames = sum(self.metadata['num_frames'])
@@ -196,20 +242,43 @@ class CWTScalogramDataset(BaseDataset):
                     f"Please specify which feature should be used as model input by adding 'CWTScalogramTransform' key, "
                     f"or modify dataset to select the desired feature."
                 )
-            
-            # Create sample item with 'final' key for model input
-            # Only include 'final' key, not individual feature keys
-            sample_item = {
-                'final': final_feature,  # Final processed data ready for model
-                'label': file_label,
-                'serie': file_serie,
-            }
         else:
             # Single feature array (not in dict) - use it as 'final'
-            sample_item = {
-                'final': frame_features,  # Final processed data ready for model
-                'label': file_label,
-                'serie': file_serie,
-            }
+            final_feature = frame_features
+        
+        # Handle channel selection if feature is multi-channel (channels, H, W, 3)
+        if isinstance(final_feature, np.ndarray):
+            if final_feature.ndim == 4 and final_feature.shape[-1] == 3:
+                # Shape is (channels, height, width, 3) - select the channel
+                num_channels = final_feature.shape[0]
+                if num_channels != len(self.available_channels):
+                    raise ValueError(
+                        f"Feature has {num_channels} channels but dataset_info.json specifies "
+                        f"{len(self.available_channels)} channels: {self.available_channels}. "
+                        f"File: {file_path}, Frame: {local_frame_index}"
+                    )
+                
+                if self.selected_channel_index >= num_channels:
+                    raise IndexError(
+                        f"Selected channel index {self.selected_channel_index} (channel '{self.selected_channel}') "
+                        f"is out of bounds for feature with {num_channels} channels. "
+                        f"File: {file_path}, Frame: {local_frame_index}"
+                    )
+                
+                # Select the channel: (channels, H, W, 3) -> (H, W, 3)
+                final_feature = final_feature[self.selected_channel_index]
+        
+        # Convert to PyTorch CHW format: (H, W, 3) -> (3, H, W)
+        if isinstance(final_feature, np.ndarray):
+            if final_feature.ndim == 3 and final_feature.shape[-1] == 3:
+                # (H, W, 3) -> (3, H, W) for PyTorch standard format
+                final_feature = np.transpose(final_feature, (2, 0, 1))
+        
+        # Create sample item with 'final' key for model input
+        sample_item = {
+            'final': final_feature,  # Final processed data ready for model (3, H, W) format - CHW
+            'label': file_label,
+            'serie': file_serie,
+        }
         
         return sample_item
