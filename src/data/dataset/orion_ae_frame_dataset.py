@@ -5,9 +5,10 @@ import numpy as np
 import pandas as pd
 
 from src.data.transforms import PreprocessPipeline, FeaturePipeline
-from src.data.dataset import BaseDataset
+from src.data.dataset import BaseDataset, register_dataset
 
 
+@register_dataset("OrionAEFrameDataset")
 class OrionAEFrameDataset(BaseDataset):
     """
     Dataset for loading raw frame data from segmented cycles.

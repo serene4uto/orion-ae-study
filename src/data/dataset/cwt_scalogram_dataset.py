@@ -3,9 +3,10 @@ from typing import Optional
 
 import numpy as np
 
-from src.data.dataset import BaseDataset
+from src.data.dataset import BaseDataset, register_dataset
 
 
+@register_dataset("CWTScalogramDataset")
 class CWTScalogramDataset(BaseDataset):
     """
     Dataset for loading pre-computed CWT scalogram features.

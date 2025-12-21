@@ -10,7 +10,13 @@ __all__ = [
     "BaseDataset",
     "OrionAEFrameDataset",
     "CWTScalogramDataset",
+    "register_dataset",
+    "get_dataset",
+    "list_datasets",
 ]
+
+# Dataset registry
+DATASET_REGISTRY = {}
 
 
 class BaseDataset(Dataset, ABC):
@@ -211,6 +217,52 @@ class BaseDataset(Dataset, ABC):
         pass
 
 
+def register_dataset(name: str):
+    """
+    Decorator to automatically register a dataset class.
+    
+    Usage:
+        @register_dataset("OrionAEFrameDataset")
+        class OrionAEFrameDataset(BaseDataset):
+            ...
+    """
+    def decorator(dataset_class):
+        if name in DATASET_REGISTRY:
+            raise ValueError(f"Dataset name '{name}' is already registered")
+        if not issubclass(dataset_class, BaseDataset):
+            raise ValueError(f"Dataset {dataset_class.__name__} must inherit from BaseDataset")
+        
+        DATASET_REGISTRY[name] = dataset_class
+        return dataset_class
+    
+    return decorator
+
+
+def get_dataset(dataset_name: str, **params):
+    """
+    Get a dataset by name and return an instance of the dataset.
+    
+    Args:
+        dataset_name: Name of the dataset type (e.g., "OrionAEFrameDataset")
+        **params: Parameters to pass to dataset constructor
+    
+    Returns:
+        Dataset instance
+    """
+    if dataset_name not in DATASET_REGISTRY:
+        raise ValueError(
+            f"Dataset '{dataset_name}' not found in registry. "
+            f"Available datasets: {list(DATASET_REGISTRY.keys())}"
+        )
+    return DATASET_REGISTRY[dataset_name](**params)
+
+
+def list_datasets():
+    """List all available dataset types."""
+    return list(DATASET_REGISTRY.keys())
+
+
 # Import subclasses here to avoid circular imports
+# They will be registered via decorators
 from src.data.dataset.orion_ae_frame_dataset import OrionAEFrameDataset
 from src.data.dataset.cwt_scalogram_dataset import CWTScalogramDataset

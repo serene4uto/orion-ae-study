@@ -6,7 +6,9 @@ Usage:
     python train.py --train_config configs/train/train_example.yaml \
                     --dataset_config configs/dataset/example_1A.yaml \
                     --model_config configs/model/simple_cnn.yaml \
-                    --data_path /path/to/data
+                    --data_path /path/to/data \
+                    [--preprocess_config configs/preprocess/preprocess_example.yaml] \
+                    [--feature_config configs/feature/feature_example.yaml]
 """
 
 import argparse
@@ -16,10 +18,10 @@ from torch.utils.data import DataLoader
 from pathlib import Path
 
 from src.core.trainer import Trainer
-from src.data.dataset import OrionAEFrameDataset
+from src.data.dataset import get_dataset, list_datasets
 from src.data.transforms import preprocessing
 from src.data.transforms import (
-    PreprocessingPipeline,
+    PreprocessPipeline,
     FilterPipeline,
     NormPipeline,
     MiscPipeline,
@@ -54,17 +56,17 @@ def get_device(device_config):
 
 def create_preprocessing_pipeline(preprocess_config):
     """
-    Create a PreprocessingPipeline from config.
+    Create a PreprocessPipeline from config.
     
     Args:
         preprocess_config: Dictionary with 'filters' and 'norms' keys.
                           Each is a list of transform configs with 'name' and 'params'.
     
     Returns:
-        PreprocessingPipeline instance
+        PreprocessPipeline instance
     """
     if not preprocess_config:
-        return PreprocessingPipeline()
+        return PreprocessPipeline()
     
     # Build filters
     filters = []
@@ -114,37 +116,66 @@ def create_preprocessing_pipeline(preprocess_config):
         else:
             LOGGER.warning(f"Invalid misc config format: {misc_cfg}. Expected dict.")
     
-    return PreprocessingPipeline(
+    return PreprocessPipeline(
         filters=FilterPipeline(filters), norms=NormPipeline(norms), miscs=MiscPipeline(miscs)
     )
 
 
 
-def create_data_loaders(dataset_config_path, data_path, train_config):
+def create_data_loaders(dataset_config_path, data_path, train_config, 
+                        preprocess_config_path=None, feature_config_path=None):
     """Create train and validation data loaders."""
-    # Load dataset config to get preprocessing settings
+    # Load dataset config
     dataset_config = load_config(dataset_config_path)
     dataset_cfg = dataset_config.get('dataset', dataset_config)
-    preprocess_config = dataset_cfg.get('preprocess', {})
     
-    # Create preprocessing pipeline from config
-    preprocessing_pipeline = create_preprocessing_pipeline(preprocess_config)
+    # Get dataset type and validate
+    dataset_type = dataset_cfg.get('type')
+    if dataset_type is None:
+        raise ValueError(
+            f"Dataset config must specify 'type' field (e.g., 'OrionAEFrameDataset' or 'CWTScalogramDataset'). "
+            f"Available types: {list_datasets()}. "
+            f"Config file: {dataset_config_path}"
+        )
     
-    # Create train dataset
-    train_dataset = OrionAEFrameDataset(
-        data_path=data_path,
-        config_path=dataset_config_path,
-        type='train',
-        preprocessing_pipeline=preprocessing_pipeline
-    )
+    LOGGER.info(f"Using dataset type: {dataset_type}")
     
-    # Create validation dataset
-    val_dataset = OrionAEFrameDataset(
-        data_path=data_path,
-        config_path=dataset_config_path,
-        type='val',
-        preprocessing_pipeline=preprocessing_pipeline
-    )
+    # Load preprocess config if provided and dataset supports it
+    preprocess_pipeline = None
+    if preprocess_config_path and preprocess_config_path.exists():
+        with open(preprocess_config_path, 'r') as f:
+            preprocess_config = yaml.safe_load(f) or {}
+        
+        preprocess_config_data = preprocess_config.get('preprocess', preprocess_config)
+        preprocess_pipeline = create_preprocessing_pipeline(preprocess_config_data)
+        LOGGER.info(f"Loaded preprocess config from: {preprocess_config_path}")
+    elif preprocess_config_path:
+        LOGGER.warning(f"Preprocess config file not found: {preprocess_config_path}. Using empty pipeline.")
+        preprocess_pipeline = PreprocessPipeline()
+    
+    # Build dataset creation kwargs
+    train_dataset_kwargs = {
+        'data_path': data_path,
+        'config_path': str(dataset_config_path),
+        'type': 'train',
+    }
+    
+    val_dataset_kwargs = {
+        'data_path': data_path,
+        'config_path': str(dataset_config_path),
+        'type': 'val',
+    }
+    
+    # Add preprocess_pipeline only for OrionAEFrameDataset
+    if dataset_type == "OrionAEFrameDataset":
+        if preprocess_pipeline is None:
+            preprocess_pipeline = PreprocessPipeline()
+        train_dataset_kwargs['preprocess_pipeline'] = preprocess_pipeline
+        val_dataset_kwargs['preprocess_pipeline'] = preprocess_pipeline
+    
+    # Create datasets using registry
+    train_dataset = get_dataset(dataset_type, **train_dataset_kwargs)
+    val_dataset = get_dataset(dataset_type, **val_dataset_kwargs)
     
     # Get data loader parameters from train config
     batch_size = train_config.get("batch_size", 32)
@@ -252,6 +283,18 @@ def main():
         required=True,
         help="Path to the data directory"
     )
+    parser.add_argument(
+        "--preprocess_config",
+        type=str,
+        default=None,
+        help="Path to preprocess configuration YAML file (optional, only for OrionAEFrameDataset)"
+    )
+    parser.add_argument(
+        "--feature_config",
+        type=str,
+        default=None,
+        help="Path to feature configuration YAML file (optional, currently unused in training)"
+    )
     
     args = parser.parse_args()
     
@@ -260,6 +303,8 @@ def main():
     dataset_config_path = Path(args.dataset_config)
     model_config_path = Path(args.model_config)
     data_path = Path(args.data_path)
+    preprocess_config_path = Path(args.preprocess_config) if args.preprocess_config else None
+    feature_config_path = Path(args.feature_config) if args.feature_config else None
     
     if not train_config_path.exists():
         raise FileNotFoundError(f"Training config not found: {train_config_path}")
@@ -275,6 +320,52 @@ def main():
     train_config_raw = load_config(train_config_path)
     train_config = train_config_raw.get('train', train_config_raw)
     
+    # Get or generate experiment name
+    # Priority: 1) train_config.experiment_name, 2) logging.tensorboard.experiment_name, 3) auto-generate
+    experiment_name = train_config.get("experiment_name")
+    if experiment_name is None:
+        if train_config.get("logging", {}).get("tensorboard", {}).get("experiment_name"):
+            experiment_name = train_config["logging"]["tensorboard"]["experiment_name"]
+        else:
+            from datetime import datetime
+            experiment_name = datetime.now().strftime("%Y%m%d_%H%M%S")
+    
+    # Create experiment directory structure: runs/{experiment_name}/
+    experiment_dir = Path("runs") / experiment_name
+    experiment_dir.mkdir(parents=True, exist_ok=True)
+    LOGGER.info(f"Experiment directory: {experiment_dir}")
+    LOGGER.info(f"All logs and checkpoints will be saved under: {experiment_dir}")
+    
+    # Update checkpoint save_dir to use experiment directory: runs/{experiment_name}/checkpoints/
+    if train_config.get("checkpoint") is not None:
+        # Override save_dir to use experiment directory structure
+        train_config["checkpoint"]["save_dir"] = str(experiment_dir / "checkpoints")
+    
+    # Update tensorboard configuration
+    # TensorBoardLogger creates: log_dir / experiment_name = runs / {experiment_name}
+    if train_config.get("logging", {}).get("tensorboard") is not None:
+        train_config["logging"]["tensorboard"]["log_dir"] = "runs"
+        train_config["logging"]["tensorboard"]["experiment_name"] = experiment_name
+    
+    # Update MLflow run_name to match experiment_name if not set
+    if train_config.get("logging", {}).get("mlflow") is not None:
+        if train_config["logging"]["mlflow"].get("run_name") is None:
+            train_config["logging"]["mlflow"]["run_name"] = experiment_name
+    
+    # Store experiment name in config for reference
+    train_config["experiment_name"] = experiment_name
+    
+    # Save config files to experiment directory for reproducibility
+    import shutil
+    shutil.copy(train_config_path, experiment_dir / "train_config.yaml")
+    shutil.copy(dataset_config_path, experiment_dir / "dataset_config.yaml")
+    shutil.copy(model_config_path, experiment_dir / "model_config.yaml")
+    if preprocess_config_path and preprocess_config_path.exists():
+        shutil.copy(preprocess_config_path, experiment_dir / "preprocess_config.yaml")
+    if feature_config_path and feature_config_path.exists():
+        shutil.copy(feature_config_path, experiment_dir / "feature_config.yaml")
+    LOGGER.info(f"Config files saved to {experiment_dir}")
+    
     # Get device
     device_config = train_config.get("device", "cuda")
     device = get_device(device_config)
@@ -285,7 +376,9 @@ def main():
     train_loader, val_loader = create_data_loaders(
         dataset_config_path=dataset_config_path,
         data_path=str(data_path),
-        train_config=train_config
+        train_config=train_config,
+        preprocess_config_path=preprocess_config_path,
+        feature_config_path=feature_config_path,
     )
     
     # Create model

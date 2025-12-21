@@ -15,7 +15,7 @@ import shutil
 from datetime import datetime
 from tqdm import tqdm
 
-from src.data.dataset import OrionAEFrameDataset
+from src.data.dataset import get_dataset, list_datasets
 from src.data.transforms.preprocess import (filters, norms, miscs)
 from src.data.transforms import features
 from src.data.transforms import (
@@ -252,12 +252,20 @@ def main():
     
     dataset_config = dataset_config_raw.get('dataset', dataset_config_raw)
     
-    # Validate dataset type
+    # Get and validate dataset type
     dataset_type = dataset_config.get('type')
+    if dataset_type is None:
+        raise ValueError(
+            f"Dataset config must specify 'type' field (e.g., 'OrionAEFrameDataset'). "
+            f"Available types: {list_datasets()}. "
+            f"Config file: {args.dataset_config_path}"
+        )
+    
+    # Only OrionAEFrameDataset supports feature extraction (requires preprocess_pipeline and feature_pipeline)
     if dataset_type != 'OrionAEFrameDataset':
         raise ValueError(
-            f"Dataset type must be 'OrionAEFrameDataset', got '{dataset_type}'. "
-            f"Please add 'type: \"OrionAEFrameDataset\"' to your dataset config."
+            f"Feature extraction currently only supports 'OrionAEFrameDataset', got '{dataset_type}'. "
+            f"Please use a dataset config with 'type: \"OrionAEFrameDataset\"'."
         )
     
     # Build pipelines
@@ -269,8 +277,9 @@ def main():
     
     feature_pipeline = process_feature_cfg(feature_cfg)
     
-    # Create dataset with type='all' to process all data
-    dataset = OrionAEFrameDataset(
+    # Create dataset with type='all' to process all data using registry
+    dataset = get_dataset(
+        dataset_type,
         data_path=str(args.frame_path),
         config_path=str(args.dataset_config_path),
         type='all',  # Process all data regardless of splits
