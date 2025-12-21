@@ -18,7 +18,12 @@ from pathlib import Path
 from src.core.trainer import Trainer
 from src.data.dataset import OrionAEFrameDataset
 from src.data.transforms import preprocessing
-from src.data.transforms.preprocessing import PreprocessingPipeline
+from src.data.transforms import (
+    PreprocessingPipeline,
+    FilterPipeline,
+    NormPipeline,
+    MiscPipeline,
+)
 from src.models import get_model
 from src.utils import LOGGER
 
@@ -53,7 +58,7 @@ def create_preprocessing_pipeline(preprocess_config):
     
     Args:
         preprocess_config: Dictionary with 'filters' and 'norms' keys.
-                          Each is a list of transform configs with 'type' and 'params'.
+                          Each is a list of transform configs with 'name' and 'params'.
     
     Returns:
         PreprocessingPipeline instance
@@ -66,7 +71,7 @@ def create_preprocessing_pipeline(preprocess_config):
     filter_configs = preprocess_config.get('filters', [])
     for filter_cfg in filter_configs:
         if isinstance(filter_cfg, dict):
-            transform_type = filter_cfg.get('type')
+            transform_type = filter_cfg.get('name')
             params = filter_cfg.get('params', {})
             
             transform_class = getattr(preprocessing, transform_type, None)
@@ -82,7 +87,7 @@ def create_preprocessing_pipeline(preprocess_config):
     norm_configs = preprocess_config.get('norms', [])
     for norm_cfg in norm_configs:
         if isinstance(norm_cfg, dict):
-            transform_type = norm_cfg.get('type')
+            transform_type = norm_cfg.get('name')
             params = norm_cfg.get('params', {})
             
             transform_class = getattr(preprocessing, transform_type, None)
@@ -93,7 +98,26 @@ def create_preprocessing_pipeline(preprocess_config):
         else:
             LOGGER.warning(f"Invalid norm config format: {norm_cfg}. Expected dict.")
     
-    return PreprocessingPipeline(filters=filters, norms=norms)
+    # Build miscs
+    miscs = []
+    misc_configs = preprocess_config.get('miscs', [])
+    for misc_cfg in misc_configs:
+        if isinstance(misc_cfg, dict):
+            transform_type = misc_cfg.get('name')
+            params = misc_cfg.get('params', {})
+            
+            transform_class = getattr(preprocessing, transform_type, None)
+            if transform_class is not None:
+                miscs.append(transform_class(**params))
+            else:
+                LOGGER.warning(f"Unknown misc type: {transform_type}. Skipping.")
+        else:
+            LOGGER.warning(f"Invalid misc config format: {misc_cfg}. Expected dict.")
+    
+    return PreprocessingPipeline(
+        filters=FilterPipeline(filters), norms=NormPipeline(norms), miscs=MiscPipeline(miscs)
+    )
+
 
 
 def create_data_loaders(dataset_config_path, data_path, train_config):

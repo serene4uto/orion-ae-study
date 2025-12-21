@@ -14,5 +14,6 @@ tqdm
 pyyaml
 matplotlib
 pywavelets
+ssqueezepy
 tensorboard
 

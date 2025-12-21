@@ -13,7 +13,7 @@ import argparse
 import yaml
 
 from src.data.dataset import OrionAEFrameDataset
-from src.data import transforms
+from src.data.transforms import preprocessing
 from src.data.transforms import (
     PreprocessingPipeline, NormPipeline, FilterPipeline, MiscPipeline,
 )
@@ -64,21 +64,21 @@ def process_preprocess_cfg(preprocess_cfg: dict):
         if filter_name is None:
             raise ValueError("Filter configuration missing 'name' field")
         filter_params = filter.get('params', {})
-        filters.append(getattr(transforms, filter_name)(**filter_params))
+        filters.append(getattr(preprocessing, filter_name)(**filter_params))
 
     for norm in preprocess_cfg.get('norms', []):
         norm_name = norm.get('name')
         if norm_name is None:
             raise ValueError("Norm configuration missing 'name' field")
         norm_params = norm.get('params', {})
-        norms.append(getattr(transforms, norm_name)(**norm_params))
+        norms.append(getattr(preprocessing, norm_name)(**norm_params))
 
     for misc in preprocess_cfg.get('miscs', []):
         misc_name = misc.get('name')
         if misc_name is None:
             raise ValueError("Misc configuration missing 'name' field")
         misc_params = misc.get('params', {})
-        miscs.append(getattr(transforms, misc_name)(**misc_params))
+        miscs.append(getattr(preprocessing, misc_name)(**misc_params))
 
     return PreprocessingPipeline(
         filters=FilterPipeline(filters),
