@@ -29,7 +29,6 @@ class FilterPipeline(BaseTransform):
                 result = filter_fn(result)
         return result
 
-
 class NormPipeline(BaseTransform):
     """
     Pipeline that applies multiple normalization transforms serially.
@@ -49,25 +48,46 @@ class NormPipeline(BaseTransform):
                 result = norm_fn(result)
         return result
 
+class MiscPipeline(BaseTransform):
+    """
+    Pipeline that applies multiple misc transforms serially.
+    """
+    
+    def __init__(self, miscs: list[Callable]):
+        self.miscs = miscs if miscs else []
+    
+    def __call__(self, data: np.ndarray, series: Optional[str] = None) -> np.ndarray:
+        """Apply all miscs serially."""
+        result = data.copy()
+        for misc_fn in self.miscs:
+            # Pass series if transform accepts it, otherwise ignore
+            try:
+                result = misc_fn(result, series=series)
+            except TypeError:
+                result = misc_fn(result)
+        return result
 
 class PreprocessingPipeline(BaseTransform):
     """
     Top-level preprocessing pipeline with fixed order:
     1. FilterPipeline (all filters)
     2. NormPipeline (all normalizations)
+    3. MiscPipeline (all miscs)
     """
     
     def __init__(
         self, 
         filters: Optional[list[Callable]] = None,
-        norms: Optional[list[Callable]] = None
+        norms: Optional[list[Callable]] = None,
+        miscs: Optional[list[Callable]] = None,
     ):
         self.filter_pipeline = FilterPipeline(filters or [])
         self.norm_pipeline = NormPipeline(norms or [])
+        self.misc_pipeline = MiscPipeline(miscs or [])
     
     def __call__(self, data: np.ndarray, series: Optional[str] = None) -> np.ndarray:
         """
-        Apply transforms serially: filters first, then norms.
+        Apply transforms serially: filters first, then norms, then miscs.
         
         Args:
             data: Data to preprocess
@@ -75,6 +95,7 @@ class PreprocessingPipeline(BaseTransform):
         """
         result = self.filter_pipeline(data, series=series)
         result = self.norm_pipeline(result, series=series)
+        result = self.misc_pipeline(result, series=series)
         return result
 
 
@@ -272,3 +293,17 @@ class SeriesZScoreNorm(BaseTransform):
             )
         
         return (data - mean[:, np.newaxis]) / std[:, np.newaxis]
+
+
+class HanningWindow(BaseTransform):
+    """Hanning window transform to reduce edge effects."""
+    
+    def __call__(self, data: np.ndarray) -> np.ndarray:
+        """Apply Hanning window to reduce edge effects."""
+        if data.ndim == 1:
+            window = np.hanning(len(data))
+            return data * window
+        else:
+            # Apply along time dimension (last axis)
+            window = np.hanning(data.shape[-1])
+            return data * window

@@ -1,0 +1,6 @@
+preprocess:
+  filters: []
+  norms: []
+  extras:
+  - name: HanningWindow
+    params: {}
