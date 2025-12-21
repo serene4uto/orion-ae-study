@@ -15,7 +15,7 @@ import shutil
 from datetime import datetime
 from tqdm import tqdm
 
-from src.data.dataset import get_dataset, list_datasets
+from src.data.dataset import get_dataset, list_datasets, OrionAEFrameDataset
 from src.data.transforms.preprocess import (filters, norms, miscs)
 from src.data.transforms import features
 from src.data.transforms import (

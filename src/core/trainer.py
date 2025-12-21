@@ -318,9 +318,21 @@ class Trainer:
         scheduler_class = getattr(optim.lr_scheduler, scheduler_name)
 
         # Get scheduler parameters
-        scheduler_params = self.scheduler_cfg.get("params", {})
+        scheduler_params = self.scheduler_cfg.get("params", {}).copy()  # Copy to avoid modifying original
         if not isinstance(scheduler_params, dict):
             raise ValueError("Scheduler 'params' must be a dictionary")
+
+        # Special handling for OneCycleLR: calculate total_steps if not provided
+        if scheduler_name == "OneCycleLR":
+            if "total_steps" not in scheduler_params or scheduler_params["total_steps"] is None:
+                # Calculate total_steps: epochs * batches_per_epoch
+                batches_per_epoch = len(self.train_loader)
+                total_steps = self.epochs * batches_per_epoch
+                scheduler_params["total_steps"] = total_steps
+                LOGGER.info(
+                    f"OneCycleLR: calculated total_steps = {total_steps} "
+                    f"({self.epochs} epochs × {batches_per_epoch} batches/epoch)"
+                )
 
         # Create scheduler with optimizer as first argument
         # Note: Some schedulers like ReduceLROnPlateau have different signatures,
@@ -457,6 +469,11 @@ class Trainer:
                 torch.nn.utils.clip_grad_norm_(self.model.parameters(), self.max_grad_norm)
             
             self.optimizer.step()
+            
+            # Update scheduler per batch for OneCycleLR (required for 1cycle policy)
+            if self.scheduler is not None:
+                if isinstance(self.scheduler, optim.lr_scheduler.OneCycleLR):
+                    self.scheduler.step()  # OneCycleLR must be called per batch
 
             # Statistics
             total_loss += base_loss.item()
@@ -604,11 +621,13 @@ class Trainer:
                         f"Best: {self.early_stopper.best_metric:.4f}"
                     )
             
-            # Update scheduler
+            # Update scheduler per epoch (for schedulers other than OneCycleLR)
+            # Note: OneCycleLR is already updated per batch in _train_epoch
             if self.scheduler is not None:
                 if isinstance(self.scheduler, optim.lr_scheduler.ReduceLROnPlateau):
                     self.scheduler.step(val_loss)
-                else:
+                elif not isinstance(self.scheduler, optim.lr_scheduler.OneCycleLR):
+                    # Only step if not OneCycleLR (already stepped per batch)
                     self.scheduler.step()
         
         LOGGER.info("Training completed!")
