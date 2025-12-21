@@ -2,6 +2,7 @@
 # 5 series, 7 loads experiments per serie, 10 1-sec chunks for each load experiment per session
 dataset:
   name: "example_1"
+  type: "OrionAEFrameDataset"
   splits: 
     train_val:
       # series: ['B', 'C', 'D', 'E']
