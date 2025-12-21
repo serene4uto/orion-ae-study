@@ -1,9 +1,11 @@
-# src/data/transforms/feature_extraction.py
+# src/data/transforms/features/cwt.py
 
 import numpy as np
 from PIL import Image
 from typing import Optional, Tuple, Dict, Any, Union
 from matplotlib import colormaps
+
+from src.data.transforms.base import BaseTransform
 
 # Try importing both libraries
 try:
@@ -21,7 +23,7 @@ except ImportError:
     pywt = None
 
 
-class CWTScalogramTransform:
+class CWTScalogramTransform(BaseTransform):
     """
     CWT Scalogram feature extraction: CWT → Magnitude → Resize → Colormap → 224×224 RGB
     
@@ -55,13 +57,17 @@ class CWTScalogramTransform:
     
     def __init__(
         self,
-        wavelet_type: str = 'gmw',
-        library: str = 'ssqueezepy',  # 'ssqueezepy' or 'pywt'
+        wavelet_type: Optional[str] = None,
+        wavelet: Optional[str] = None,  # Alias for wavelet_type
+        library: Optional[str] = None,  # 'ssqueezepy' or 'pywt' (auto-detected if None)
         wavelet_params: Optional[Dict[str, Any]] = None,
-        fs: float = 5e6,
+        fs: Optional[float] = None,
+        sampling_rate: Optional[float] = None,  # Alias for fs
         n_scales: int = 12,
-        freq_min: float = 50e3,
-        freq_max: float = 2.5e6,
+        freq_min: Optional[float] = None,
+        freq_max: Optional[float] = None,
+        min_scale: Optional[float] = None,  # Alternative to freq_min (scale-based)
+        max_scale: Optional[float] = None,  # Alternative to freq_max (scale-based)
         target_size: Tuple[int, int] = (224, 224),
         colormap: str = 'viridis',
         l1_norm: bool = True,
@@ -69,18 +75,24 @@ class CWTScalogramTransform:
         """
         Parameters:
         -----------
-        wavelet_type : str
-            Wavelet type name (depends on library)
-        library : str
-            Library to use: 'ssqueezepy' or 'pywt'
+        wavelet_type : str, optional
+            Wavelet type name (depends on library). Can also use 'wavelet' parameter.
+        wavelet : str, optional
+            Alias for wavelet_type
+        library : str, optional
+            Library to use: 'ssqueezepy' or 'pywt'. If None, auto-detects based on wavelet name.
         wavelet_params : dict, optional
             Wavelet-specific parameters (for ssqueezepy wavelets)
-        fs : float
-            Sampling frequency (default: 5e6 Hz)
+        fs : float, optional
+            Sampling frequency. Can also use 'sampling_rate' parameter. (default: 5e6 Hz)
+        sampling_rate : float, optional
+            Alias for fs
         n_scales : int
             Number of wavelet scales (default: 12)
-        freq_min, freq_max : float
-            Frequency range to cover (default: 50 kHz to 2.5 MHz)
+        freq_min, freq_max : float, optional
+            Frequency range to cover in Hz (default: 50 kHz to 2.5 MHz)
+        min_scale, max_scale : float, optional
+            Scale range (alternative to freq_min/freq_max). If provided, will be converted to frequencies.
         target_size : tuple
             Output image size (default: (224, 224))
         colormap : str
@@ -88,16 +100,29 @@ class CWTScalogramTransform:
         l1_norm : bool
             Use L1 normalization (only for ssqueezepy)
         """
-        self.library = library.lower()
-        self.wavelet_type = wavelet_type.lower()
-        self.wavelet_params = wavelet_params or {}
-        self.fs = fs
-        self.n_scales = n_scales
-        self.freq_min = freq_min
-        self.freq_max = freq_max
-        self.target_size = target_size
-        self.colormap = colormap
-        self.l1_norm = l1_norm
+        # Handle aliases
+        wavelet_type_input = (wavelet_type or wavelet or 'gmw').lower()
+        self.fs = fs or sampling_rate or 5e6
+        
+        # Auto-detect library if not specified and wavelet is known
+        if library is None:
+            # Auto-detect based on wavelet name
+            # Check if it's a known PyWavelets wavelet
+            if wavelet_type_input in self.PYWT_WAVELETS:
+                self.library = 'pywt'
+            elif wavelet_type_input in ['gmw', 'morse', 'morlet', 'bump', 'cmhat']:
+                self.library = 'ssqueezepy'
+            else:
+                # Default to ssqueezepy
+                self.library = 'ssqueezepy'
+        else:
+            library_lower = library.lower()
+            if library_lower == 'ssqueezepy':
+                self.library = 'ssqueezepy'
+            elif library_lower == 'pywt':
+                self.library = 'pywt'
+            else:
+                raise ValueError(f"Unknown library: {library}. Must be 'ssqueezepy' or 'pywt'")
         
         # Validate library availability
         if self.library == 'ssqueezepy' and not SSQUEEZEPY_AVAILABLE:
@@ -107,13 +132,44 @@ class CWTScalogramTransform:
         
         # Normalize and validate wavelet type
         if self.library == 'ssqueezepy':
-            self.wavelet_type = self._normalize_ssqueezepy_wavelet(self.wavelet_type)
-            if not self.wavelet_params:
+            self.wavelet_type = self._normalize_ssqueezepy_wavelet(wavelet_type_input)
+            if not wavelet_params:
                 self.wavelet_params = self._get_default_ssqueezepy_params(self.wavelet_type)
+            else:
+                self.wavelet_params = wavelet_params
         elif self.library == 'pywt':
-            self.wavelet_type = self._normalize_pywt_wavelet(self.wavelet_type)
+            self.wavelet_type = self._normalize_pywt_wavelet(wavelet_type_input)
+            self.wavelet_params = wavelet_params or {}
         else:
             raise ValueError(f"Unknown library: {library}. Must be 'ssqueezepy' or 'pywt'")
+        
+        # Handle scale-based vs frequency-based parameters
+        if min_scale is not None or max_scale is not None:
+            # Convert scales to frequencies
+            if min_scale is None or max_scale is None:
+                raise ValueError("Both min_scale and max_scale must be provided if using scale-based parameters")
+            
+            # Get wavelet center frequency for conversion
+            if self.library == 'pywt':
+                center_freq = self._get_pywt_center_frequency()
+                # frequency = fs / (scale * center_freq) => scale = fs / (frequency * center_freq)
+                # So: frequency = fs / (scale * center_freq)
+                self.freq_min = self.fs / (max_scale * center_freq)  # Higher scale = lower frequency
+                self.freq_max = self.fs / (min_scale * center_freq)  # Lower scale = higher frequency
+            else:
+                # For ssqueezepy, use similar conversion
+                center_freq = 1.0  # Approximate
+                self.freq_min = self.fs / (max_scale * center_freq)
+                self.freq_max = self.fs / (min_scale * center_freq)
+        else:
+            # Use frequency-based parameters
+            self.freq_min = freq_min or 50e3
+            self.freq_max = freq_max or 2.5e6
+        
+        self.n_scales = n_scales
+        self.target_size = target_size
+        self.colormap = colormap
+        self.l1_norm = l1_norm
     
     def _normalize_ssqueezepy_wavelet(self, wavelet_type: str) -> str:
         """Normalize ssqueezepy wavelet type name"""
@@ -305,9 +361,9 @@ class CWTScalogramTransform:
         
         return rgb_image
     
-    def __call__(self, signal: np.ndarray) -> np.ndarray:
+    def _process_single_channel(self, signal: np.ndarray) -> np.ndarray:
         """
-        Apply CWT scalogram transform.
+        Process a single channel signal to scalogram.
         
         Parameters:
         -----------
@@ -319,13 +375,6 @@ class CWTScalogramTransform:
         scalogram_rgb : array (height × width × 3)
             RGB scalogram image (uint8)
         """
-        # Ensure 1D input
-        if signal.ndim > 1:
-            if signal.ndim == 2 and signal.shape[0] == 1:
-                signal = signal[0]
-            else:
-                raise ValueError(f"Expected 1D signal, got shape {signal.shape}")
-        
         # Step 1: Compute CWT
         cwt_coeffs, frequencies = self._compute_cwt(signal)
         
@@ -336,3 +385,31 @@ class CWTScalogramTransform:
         scalogram_rgb = self._magnitude_to_rgb(magnitude)
         
         return scalogram_rgb
+    
+    def __call__(self, signal: np.ndarray) -> np.ndarray:
+        """
+        Apply CWT scalogram transform.
+        
+        Parameters:
+        -----------
+        signal : array (time_steps,) or (channels, time_steps)
+            Input signal (1D or 2D array)
+            
+        Returns:
+        --------
+        scalogram_rgb : array (height × width × 3) or (channels, height × width × 3)
+            RGB scalogram image(s) (uint8)
+        """
+        if signal.ndim == 1:
+            # Single channel
+            return self._process_single_channel(signal)
+        elif signal.ndim == 2:
+            # Multi-channel: (channels, time_steps)
+            n_channels = signal.shape[0]
+            scalograms = []
+            for i in range(n_channels):
+                scalogram = self._process_single_channel(signal[i])
+                scalograms.append(scalogram)
+            return np.stack(scalograms, axis=0)  # (channels, height, width, 3)
+        else:
+            raise ValueError(f"Expected 1D or 2D signal, got shape {signal.shape}")

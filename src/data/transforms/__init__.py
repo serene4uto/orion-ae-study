@@ -1,18 +1,19 @@
 """Data transforms for preprocessing and feature extraction."""
 
-from src.data.transforms.preprocessing import (
-    BaseTransform,
+from src.data.transforms.base import BaseTransform
+
+# Import pipelines from base module
+from src.data.transforms.base import (
     FilterPipeline,
     NormPipeline,
     MiscPipeline,
-    PreprocessingPipeline,
-    HighPassFilter,
-    MinMaxNorm,
-    ZScoreNorm,
-    SeriesZScoreNorm,
-    HanningWindow,
+    PreprocessPipeline,
+    FeaturePipeline,
 )
 
+# Module aliases for backward compatibility (used in notebooks, scripts)
+from src.data.transforms import preprocess as preprocessing
+from src.data.transforms import features
 
 __all__ = [
     "BaseTransform",
@@ -20,12 +21,9 @@ __all__ = [
     "FilterPipeline",
     "NormPipeline",
     "MiscPipeline",
-    "PreprocessingPipeline",
-    # Filter Transforms
-    "HighPassFilter",
-    # Normalization Transforms
-    "MinMaxNorm",
-    "ZScoreNorm",
-    "SeriesZScoreNorm",
-    "HanningWindow",
+    "PreprocessPipeline",
+    "FeaturePipeline",
+    # Module aliases
+    "preprocessing",
+    "features",
 ]

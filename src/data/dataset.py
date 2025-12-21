@@ -6,7 +6,7 @@ import pandas as pd
 import numpy as np
 import yaml
 
-from src.data.transforms.preprocessing import PreprocessingPipeline
+from src.data.transforms import PreprocessPipeline, FeaturePipeline
 
 
 class OrionAEFrameDataset(Dataset):
@@ -17,8 +17,9 @@ class OrionAEFrameDataset(Dataset):
         self,
         data_path: str,
         config_path: str,
-        type: str = 'train', # 'train', 'val', 'test'
-        preprocessing_pipeline: Optional[PreprocessingPipeline] = None,
+        type: str = 'train', # 'train', 'val', 'test', 'all'
+        preprocess_pipeline: Optional[PreprocessPipeline] = None,
+        feature_pipeline: Optional[FeaturePipeline] = None,
     ):
         # Convert to Path objects if strings are passed
         self.data_path = Path(data_path)
@@ -61,7 +62,11 @@ class OrionAEFrameDataset(Dataset):
 
         # Initialize preprocessing pipeline
         # If not provided, create an empty pipeline (no-op)
-        self.preprocessing_pipeline = preprocessing_pipeline or PreprocessingPipeline()
+        self.preprocess_pipeline = preprocess_pipeline or PreprocessPipeline()
+        
+        # Initialize feature extraction pipeline
+        # If not provided, create an empty pipeline (returns empty dict)
+        self.feature_pipeline = feature_pipeline or FeaturePipeline([])
 
         # load metadata
         metadata = self._filter_metadata(
@@ -92,12 +97,17 @@ class OrionAEFrameDataset(Dataset):
     def _filter_metadata(self, metadata: pd.DataFrame, type: str, config: dict):
         """
         Filters the metadata DataFrame according to the dataset split configuration.
-        This method selects the appropriate subset of the data for 'train', 'val', or 'test' sets based on the configuration file.
+        This method selects the appropriate subset of the data for 'train', 'val', 'test', or 'all' sets based on the configuration file.
+        - For type 'all', it returns all metadata without any filtering.
         - For type 'test', it performs a serie-based split using the series listed in config['splits']['test'].
         - For 'train' or 'val', it excludes test series and splits based on either chunk index or series index, 
           depending on config['splits']['train_val']['type'] ('chunk-based' or 'serie-based').
         Returns the filtered metadata DataFrame.
         """
+        # Handle 'all' type - return all metadata without filtering
+        if type == 'all':
+            return metadata
+        
         # Handle test split (always serie-based)
         if type == 'test':
             return metadata[metadata['series'].isin(config['splits']['test'])]
@@ -184,13 +194,29 @@ class OrionAEFrameDataset(Dataset):
             data: Data to preprocess
             series: Optional series name for series-aware transforms
         """
-        return self.preprocessing_pipeline(data, series=series)
+        return self.preprocess_pipeline(data, series=series)
     
     def _extract_features(self, data: np.ndarray) -> dict:
         """
-        Extracts the features from the data.
+        Extracts the features from the data using the feature pipeline.
+        
+        Args:
+            data: Preprocessed data with shape (channels, 1, time_steps)
+            
+        Returns:
+            Dictionary with feature names as keys and feature arrays as values
         """
-        return {}
+        # Handle shape: (channels, 1, time_steps) -> (channels, time_steps)
+        # Feature transforms expect (channels, time_steps) or (time_steps,)
+        if data.ndim == 3:
+            # Remove the middle dimension: (channels, 1, time_steps) -> (channels, time_steps)
+            data = data.squeeze(axis=1)
+        elif data.ndim == 2 and data.shape[0] == 1:
+            # Single channel: (1, time_steps) -> (time_steps,)
+            data = data[0]
+        
+        # Apply feature pipeline
+        return self.feature_pipeline(data)
 
     def _load_data(self, file_path: str) -> np.ndarray:
         """
