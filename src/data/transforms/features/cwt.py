@@ -71,6 +71,7 @@ class CWTScalogramTransform(BaseTransform):
         target_size: Tuple[int, int] = (224, 224),
         colormap: str = 'viridis',
         l1_norm: bool = True,
+        output_format: str = 'rgb',  # 'rgb' or 'magnitude'
     ):
         """
         Parameters:
@@ -99,6 +100,9 @@ class CWTScalogramTransform(BaseTransform):
             Matplotlib colormap name (default: 'viridis')
         l1_norm : bool
             Use L1 normalization (only for ssqueezepy)
+        output_format : str
+            Output format: 'rgb' returns uint8 RGB images (H, W, 3),
+            'magnitude' returns float32 magnitude array (scales, time). Default: 'rgb'
         """
         # Handle aliases
         wavelet_type_input = (wavelet_type or wavelet or 'gmw').lower()
@@ -165,6 +169,26 @@ class CWTScalogramTransform(BaseTransform):
             # Use frequency-based parameters
             self.freq_min = freq_min or 50e3
             self.freq_max = freq_max or 2.5e6
+        
+        # Validate frequency range against Nyquist
+        nyquist = self.fs / 2
+        if self.freq_max > nyquist:
+            import warnings
+            warnings.warn(
+                f"freq_max {self.freq_max} Hz exceeds Nyquist frequency {nyquist} Hz. "
+                f"Clamping to {nyquist * 0.99} Hz to avoid aliasing."
+            )
+            self.freq_max = nyquist * 0.99
+        
+        if self.freq_min >= self.freq_max:
+            raise ValueError(
+                f"freq_min ({self.freq_min}) must be less than freq_max ({self.freq_max})"
+            )
+        
+        # Validate and store output format
+        if output_format not in ['rgb', 'magnitude']:
+            raise ValueError(f"output_format must be 'rgb' or 'magnitude', got '{output_format}'")
+        self.output_format = output_format
         
         self.n_scales = n_scales
         self.target_size = target_size
@@ -262,8 +286,17 @@ class CWTScalogramTransform(BaseTransform):
         return scales, frequencies
     
     def _get_pywt_center_frequency(self) -> float:
-        """Get approximate center frequency for PyWavelets wavelets"""
-        # These are approximate center frequencies
+        """Get precise center frequency from PyWavelets"""
+        # Try to use PyWavelets built-in function for precision
+        if PYWT_AVAILABLE:
+            try:
+                return pywt.central_frequency(self.wavelet_type)
+            except (ValueError, AttributeError, TypeError):
+                # Fallback for wavelets that don't support central_frequency
+                # or for custom wavelets
+                pass
+        
+        # Fallback to approximate center frequencies
         center_freqs = {
             'morl': 1.0,      # Morlet
             'mexh': 0.25,     # Mexican Hat
@@ -332,31 +365,48 @@ class CWTScalogramTransform(BaseTransform):
     
     def _magnitude_to_rgb(self, magnitude: np.ndarray) -> np.ndarray:
         """
-        Convert magnitude array to RGB image:
-        Magnitude → Normalize → Resize → Colormap → RGB
-        """
-        # Normalize to [0, 255]
-        magnitude_norm = magnitude / (np.max(magnitude) + 1e-10)
-        magnitude_8bit = (magnitude_norm * 255).astype(np.uint8)
+        Refined pipeline: Log-Modulus -> Resize (Float) -> Normalize -> Colormap
         
-        # Resize to target size using PIL
-        img = Image.fromarray(magnitude_8bit, mode='L')
+        This preserves signal fidelity by:
+        1. Using log scaling to handle high dynamic range
+        2. Resizing in float space to preserve gradients
+        3. Normalizing after resize to handle edge artifacts
+        """
+        # 1. Log-Modulus Transform (Compress dynamic range)
+        # Makes low-amplitude features visible even if artifacts exist
+        # log1p(x) = log(1+x) is safer than log(x) and handles zeros
+        magnitude_log = np.log1p(magnitude)
+        
+        # 2. Resize as FLOAT (Preserve gradients)
+        # Use PIL 'F' mode (32-bit float) for resizing
+        img = Image.fromarray(magnitude_log, mode='F')
+        
         try:
             img_resized = img.resize(
                 (self.target_size[1], self.target_size[0]), 
-                Image.Resampling.BILINEAR
+                Image.Resampling.BICUBIC  # Bicubic is better for continuous signals
             )
         except AttributeError:
+            # Fallback for older PIL versions
             img_resized = img.resize(
                 (self.target_size[1], self.target_size[0]), 
-                Image.BILINEAR
+                Image.BICUBIC
             )
         
         magnitude_resized = np.array(img_resized)
-        
-        # Apply colormap
-        norm = magnitude_resized / 255.0
+
+        # 3. Robust Normalization (Min-Max)
+        # Normalize to [0, 1] AFTER resizing to handle edge artifacts
+        v_min, v_max = magnitude_resized.min(), magnitude_resized.max()
+        if v_max - v_min > 1e-10:
+            norm = (magnitude_resized - v_min) / (v_max - v_min)
+        else:
+            # Handle edge case where all values are the same
+            norm = np.zeros_like(magnitude_resized)
+
+        # 4. Apply Colormap -> RGB
         colormap = colormaps[self.colormap]
+        # Colormap returns (H, W, 4) RGBA floats [0-1], we want (H, W, 3) uint8
         rgb_image = (colormap(norm)[:, :, :3] * 255).astype(np.uint8)
         
         return rgb_image
@@ -372,8 +422,9 @@ class CWTScalogramTransform(BaseTransform):
             
         Returns:
         --------
-        scalogram_rgb : array (height × width × 3)
-            RGB scalogram image (uint8)
+        output : array
+            If output_format='rgb': (height × width × 3) uint8 RGB image
+            If output_format='magnitude': (scales × time) float32 magnitude array
         """
         # Step 1: Compute CWT
         cwt_coeffs, frequencies = self._compute_cwt(signal)
@@ -381,10 +432,14 @@ class CWTScalogramTransform(BaseTransform):
         # Step 2: Take magnitude
         magnitude = np.abs(cwt_coeffs)
         
-        # Step 3: Convert to RGB scalogram
-        scalogram_rgb = self._magnitude_to_rgb(magnitude)
-        
-        return scalogram_rgb
+        # Step 3: Return based on output format
+        if self.output_format == 'magnitude':
+            # Return raw float magnitude array
+            return magnitude.astype(np.float32)
+        else:  # output_format == 'rgb'
+            # Convert to RGB scalogram
+            scalogram_rgb = self._magnitude_to_rgb(magnitude)
+            return scalogram_rgb
     
     def __call__(self, signal: np.ndarray) -> np.ndarray:
         """
@@ -397,8 +452,11 @@ class CWTScalogramTransform(BaseTransform):
             
         Returns:
         --------
-        scalogram_rgb : array (height × width × 3) or (channels, height × width × 3)
-            RGB scalogram image(s) (uint8)
+        output : array
+            If output_format='rgb':
+                (height × width × 3) or (channels, height × width × 3) uint8 RGB images
+            If output_format='magnitude':
+                (scales × time) or (channels, scales × time) float32 magnitude arrays
         """
         if signal.ndim == 1:
             # Single channel
