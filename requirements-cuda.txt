@@ -16,4 +16,5 @@ matplotlib
 pywavelets
 ssqueezepy
 tensorboard
+mlflow
 
