@@ -3,13 +3,16 @@
 dataset:
   name: "example_1"
   type: "OrionAEFrameDataset"
-  splits: 
-    train_val:
-      # series: ['B', 'C', 'D', 'E']
-      type: chunk-based # chunk-based or serie-based
-      train: [0,1,2,3,4,5,6,7]
-      val: [8,9]
-    test: ['F'] # always serie-based split
+  splits:
+    train:
+      'B': [1,2,3,4,5,6,7,8,9,10]
+      'C': [1,2,3,4,5,6,7,8,9,10]
+      'D': [1,2,3,4,5,6,7,8,9,10]
+      'E': [1,2,3,4,5,6,7,8,9,10]
+    val:
+      'F': [1,2,3,4,5,6,7,8,9,10]
+    test:
+      'F': [1,2,3,4,5,6,7,8,9,10]
   # channels: ["A", "B", "C", "D"] # define selectedchannels here based on channel names
   channels: ["A"] # define selectedchannels here based on channel names
   labels: 

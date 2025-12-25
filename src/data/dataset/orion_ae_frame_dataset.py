@@ -198,7 +198,7 @@ class OrionAEFrameDataset(BaseDataset):
             # (channels, time_steps) -> (channels, 1, time_steps)
             preprocessed = preprocessed[:, np.newaxis, :]
         
-        sample_item['final'] = preprocessed  # (channels, 1, time_steps) - final processed data ready for model
+        sample_item['final'] = self._extract_features(preprocessed) 
         sample_item['label'] = file_label
         sample_item['serie'] = file_serie
 
