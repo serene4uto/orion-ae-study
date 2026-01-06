@@ -1,4 +1,6 @@
 train:
+  run_dir: null
+  
   # Device to use for training ('cuda', 'cpu', or 'auto')
   device: "cuda"
   
@@ -50,7 +52,6 @@ train:
   # Optional: Checkpointing
   checkpoint:
     monitor: "val/loss" # or "val/acc"
-    save_dir: "runs/checkpoints"
     save_best: true
     save_every_n_epochs: 10
 
@@ -59,7 +60,6 @@ train:
     # Enable/disable specific loggers
     tensorboard:
       enabled: true
-      log_dir: "runs/tensorboard"
       experiment_name: null  # null will auto-generate from timestamp
       log_interval: 10  # Log every N batches (optional)
       log_graph: true  # Log model computational graph (optional)
@@ -67,7 +67,7 @@ train:
       log_images: false  # Log sample images (if applicable)
     
     mlflow:
-      enabled: true
+      enabled: false
       tracking_uri: null  # null uses default (local ./mlruns), or set to remote URI
       experiment_name: "orion-ae-study"  # MLflow experiment name
       run_name: null  # null will auto-generate, or set custom name

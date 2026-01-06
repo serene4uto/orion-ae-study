@@ -333,7 +333,8 @@ def main():
             experiment_name = datetime.now().strftime("%Y%m%d_%H%M%S")
     
     # Create experiment directory structure: runs/{experiment_name}/
-    experiment_dir = Path("runs") / experiment_name
+    runs_dir = train_config.get("run_dir", "runs")
+    experiment_dir = Path(runs_dir) / experiment_name
     experiment_dir.mkdir(parents=True, exist_ok=True)
     LOGGER.info(f"Experiment directory: {experiment_dir}")
     LOGGER.info(f"All logs and checkpoints will be saved under: {experiment_dir}")

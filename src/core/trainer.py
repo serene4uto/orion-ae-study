@@ -87,7 +87,7 @@ class TensorBoardLogger:
         except ImportError:
             raise ImportError("tensorboard is required. Install with: pip install tensorboard")
         
-        log_dir = config.get("log_dir", "runs/tensorboard")
+        log_dir = config.get("log_dir", "")
         experiment_name = config.get("experiment_name")
         
         if experiment_name is None:
@@ -647,19 +647,6 @@ class Trainer:
                 if logger.log_artifacts and self.checkpoint_manager is not None:
                     logger.log_artifacts_dir(str(self.checkpoint_manager.save_dir), "checkpoints")
                 logger.close()
-
-
-
-            
-
-
-
-
-
-
-            
-            
-        
 
     def val(self):
         pass
