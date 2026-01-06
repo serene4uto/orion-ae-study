@@ -228,7 +228,7 @@ def create_eval_dataset(dataset_config_path, data_path, split, preprocess_config
     # Build dataset creation kwargs
     dataset_kwargs = {
         'data_path': data_path,
-        'config_path': str(dataset_config_path),
+        'config': dataset_cfg,
         'type': split,
     }
     
@@ -285,7 +285,7 @@ def create_model_from_config(model_config_path, dataset_config_path, device):
     if 'num_classes' not in model_params:
         model_params['num_classes'] = num_classes
     
-    # Always override in_channels from dataset config
+    # Override in_channels from dataset config if the model accepts it
     if 'in_channels' in model_params:
         model_params['in_channels'] = num_channels
     

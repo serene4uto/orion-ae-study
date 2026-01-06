@@ -4,3 +4,7 @@ python scripts/build_feature_set.py --frame-path data/raw/segmented_cycles_posit
 python train.py --train_config configs/train/train_example.yaml --dataset_config configs/dataset/cwt_scalogram_A.yaml --model_config configs/model/efficientnet_b5.yaml --data_path F:\orion-ae-study\data\processed\example_1_features_20251221_182611
 
 python scripts/build_feature_set.py --frame-path data/raw/segmented_cycles_positive_c1_l42373_c_A_B_C_D_20251220_154951 --dataset-config-path configs/dataset/example_1.yaml --preprocess-config-path configs/preprocess/preprocess_exp1.yaml --feature-config-path configs/feature/feature_example.yaml --save-path data/processed
+
+
+
+python eval.py     --checkpoint runs/20260107_020952/checkpoints/best_model.pt     --dataset_config runs/20260107_020952/config/dataset_config.yaml     --model_config runs/20260107_020952/config/model_config.yaml     --data_path data/processed/example_1_features_20251222_183540     --split test
