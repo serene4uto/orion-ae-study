@@ -24,7 +24,7 @@ class CWTScalogramDataset(BaseDataset):
     def __init__(
         self,
         data_path: str,
-        config_path: str,
+        config: dict,
         type: str = 'train',  # 'train', 'val', 'test', 'all'
     ):
         """
@@ -32,11 +32,11 @@ class CWTScalogramDataset(BaseDataset):
         
         Args:
             data_path: Path to processed feature dataset directory containing metadata.csv
-            config_path: Path to dataset configuration YAML file
+            config: Dataset configuration dictionary
             type: Dataset split type ('train', 'val', 'test', 'all')
         """
         # Initialize base class (handles config, metadata filtering, label building)
-        super().__init__(data_path, config_path, type)
+        super().__init__(data_path, config, type)
         
         # Load dataset_info.json to get channel names and order
         dataset_info_path = self.data_path / 'dataset_info.json'

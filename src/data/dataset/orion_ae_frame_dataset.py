@@ -21,13 +21,13 @@ class OrionAEFrameDataset(BaseDataset):
     def __init__(
         self,
         data_path: str,
-        config_path: str,
+        config: dict,
         type: str = 'train',  # 'train', 'val', 'test', 'all'
         preprocess_pipeline: Optional[PreprocessPipeline] = None,
         feature_pipeline: Optional[FeaturePipeline] = None,
     ):
         # Initialize base class (handles config, metadata filtering, label building)
-        super().__init__(data_path, config_path, type)
+        super().__init__(data_path, config, type)
         
         self.num_frames = 0
 

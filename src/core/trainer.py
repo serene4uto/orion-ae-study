@@ -81,19 +81,13 @@ class CheckpointManager:
 
 class TensorBoardLogger:
     """TensorBoard logging wrapper."""
-    def __init__(self, config):
+    def __init__(self, config, log_dir):
         try:
             from torch.utils.tensorboard import SummaryWriter
         except ImportError:
             raise ImportError("tensorboard is required. Install with: pip install tensorboard")
         
-        log_dir = config.get("log_dir", "")
-        experiment_name = config.get("experiment_name")
-        
-        if experiment_name is None:
-            experiment_name = datetime.now().strftime("%Y%m%d_%H%M%S")
-        
-        self.log_dir = Path(log_dir) / experiment_name
+        self.log_dir = Path(log_dir)
         self.log_dir.mkdir(parents=True, exist_ok=True)
         
         self.writer = SummaryWriter(str(self.log_dir))
@@ -250,7 +244,7 @@ class Trainer:
         train_loader,
         val_loader,
         config,
-
+        **kwargs,
     ):
         self.model = model
         self.train_loader = train_loader
@@ -270,6 +264,9 @@ class Trainer:
         self.checkpoint_cfg = config.get("checkpoint")
         self.logging_cfg = config.get("logging")
         
+        self.experiment_dir = Path(kwargs.get("experiment_dir"))
+        
+        
         # Initialize early stopping
         if self.early_stopping is not None:
             self.early_stopper = EarlyStopping(
@@ -284,21 +281,22 @@ class Trainer:
         self.checkpoint_manager = None
         if self.checkpoint_cfg is not None:
             self.checkpoint_manager = CheckpointManager(
-                save_dir=self.checkpoint_cfg.get("save_dir", "runs/checkpoints"),
+                save_dir=self.experiment_dir / "checkpoints",
                 monitor=self.checkpoint_cfg.get("monitor", "val/loss"),
                 save_best=self.checkpoint_cfg.get("save_best", True),
                 save_every_n_epochs=self.checkpoint_cfg.get("save_every_n_epochs", None)
             )
 
         # Initialize loggers
+        log_dir = self.experiment_dir / "logs"
         self.loggers = []
         if self.logging_cfg is not None:
             if self.logging_cfg.get("tensorboard", {}).get("enabled", False):
-                self.loggers.append(TensorBoardLogger(self.logging_cfg["tensorboard"]))
+                self.loggers.append(TensorBoardLogger(self.logging_cfg["tensorboard"], log_dir))
             if self.logging_cfg.get("mlflow", {}).get("enabled", False):
                 self.loggers.append(MLflowLogger(self.logging_cfg["mlflow"]))
 
-        self.criterias = self._init_criteria()
+        self.criteria = self._init_criteria()
         self.optimizer = self._init_optimizer()
         self.scheduler = self._init_scheduler()
 
@@ -498,7 +496,7 @@ class Trainer:
     def _compute_loss(self, outputs, labels) -> tuple:
         loss = torch.tensor(0.0, device=self.device)
         loss_components = {}
-        for idx, (loss_name, criterion) in enumerate(self.criterias.items()):
+        for idx, (loss_name, criterion) in enumerate(self.criteria.items()):
             loss_value = criterion(outputs, labels)
             loss_components[loss_name] = loss_value
             loss += loss_value * self.criteria_weights[idx]

@@ -36,6 +36,12 @@ def load_config(config_path):
         config = yaml.safe_load(f)
     return config
 
+def save_config(config, config_path):
+    """Save YAML configuration file."""
+    if not config_path.exists():
+        config_path.parent.mkdir(parents=True, exist_ok=True)
+    with open(config_path, 'w', encoding='utf-8') as f:
+        yaml.dump(config, f, default_flow_style=False, allow_unicode=True, sort_keys=False)
 
 def get_device(device_config):
     """Get the appropriate device for training."""
@@ -52,7 +58,6 @@ def get_device(device_config):
     
     LOGGER.info(f"Using device: {device}")
     return device
-
 
 def create_preprocessing_pipeline(preprocess_config):
     """
@@ -120,13 +125,10 @@ def create_preprocessing_pipeline(preprocess_config):
         filters=FilterPipeline(filters), norms=NormPipeline(norms), miscs=MiscPipeline(miscs)
     )
 
-
-
-def create_data_loaders(dataset_config_path, data_path, train_config, 
-                        preprocess_config_path=None, feature_config_path=None):
+def create_data_loaders(dataset_config, data_path, train_config, 
+                        preprocess_config=None, feature_config=None):
     """Create train and validation data loaders."""
-    # Load dataset config
-    dataset_config = load_config(dataset_config_path)
+    
     dataset_cfg = dataset_config.get('dataset', dataset_config)
     
     # Get dataset type and validate
@@ -135,34 +137,23 @@ def create_data_loaders(dataset_config_path, data_path, train_config,
         raise ValueError(
             f"Dataset config must specify 'type' field (e.g., 'OrionAEFrameDataset' or 'CWTScalogramDataset'). "
             f"Available types: {list_datasets()}. "
-            f"Config file: {dataset_config_path}"
         )
     
     LOGGER.info(f"Using dataset type: {dataset_type}")
     
-    # Load preprocess config if provided and dataset supports it
-    preprocess_pipeline = None
-    if preprocess_config_path and preprocess_config_path.exists():
-        with open(preprocess_config_path, 'r') as f:
-            preprocess_config = yaml.safe_load(f) or {}
-        
-        preprocess_config_data = preprocess_config.get('preprocess', preprocess_config)
-        preprocess_pipeline = create_preprocessing_pipeline(preprocess_config_data)
-        LOGGER.info(f"Loaded preprocess config from: {preprocess_config_path}")
-    elif preprocess_config_path:
-        LOGGER.warning(f"Preprocess config file not found: {preprocess_config_path}. Using empty pipeline.")
-        preprocess_pipeline = PreprocessPipeline()
+    # Create preprocessing pipeline
+    preprocess_pipeline = create_preprocessing_pipeline(preprocess_config)
     
     # Build dataset creation kwargs
     train_dataset_kwargs = {
         'data_path': data_path,
-        'config_path': str(dataset_config_path),
+        'config': dataset_config,
         'type': 'train',
     }
     
     val_dataset_kwargs = {
         'data_path': data_path,
-        'config_path': str(dataset_config_path),
+        'config': dataset_config,
         'type': 'val',
     }
     
@@ -208,29 +199,18 @@ def create_data_loaders(dataset_config_path, data_path, train_config,
     return train_loader, val_loader
 
 
-def create_model(model_config, dataset_config_path, data_path, device):
+def create_model(model_config, dataset_config, data_path, device):
     """Create model from configuration."""
-    model_config_data = load_config(model_config)
-    
-    # Extract model config (handle both 'model' root key and direct config)
-    if 'model' in model_config_data:
-        model_cfg = model_config_data['model']
-    else:
-        model_cfg = model_config_data
-    
-    model_name = model_cfg['model_name']
-    model_params = model_cfg.get('params', {})
-    
-    # Get input shape from dataset config
-    dataset_config = load_config(dataset_config_path)
-    dataset_cfg = dataset_config.get('dataset', dataset_config)
+    model_config_data = model_config.get('model', model_config)
+    model_name = model_config_data['model_name']
+    model_params = model_config_data.get('params', {})
     
     # Get number of channels from dataset config
-    channels = dataset_cfg.get('channels', ['A', 'B', 'C', 'D'])
+    channels = dataset_config.get('channels', ['A', 'B', 'C', 'D'])
     num_channels = len(channels)
     
     # Get number of classes from dataset config labels
-    labels = dataset_cfg.get('labels', {})
+    labels = dataset_config.get('labels', {})
     num_classes = len(labels)
     
     # Set num_classes if not specified
@@ -322,53 +302,38 @@ def main():
     train_config_raw = load_config(train_config_path)
     train_config = train_config_raw.get('train', train_config_raw)
     
+    # Load dataset configuration
+    LOGGER.info(f"Loading dataset config from: {dataset_config_path}")
+    dataset_config_raw = load_config(dataset_config_path)
+    dataset_config = dataset_config_raw.get('dataset', dataset_config_raw)
+    
+    # Load model configuration
+    LOGGER.info(f"Loading model config from: {model_config_path}")
+    model_config_raw = load_config(model_config_path)
+    model_config = model_config_raw.get('model', model_config_raw)
+    
+    # Load preprocess configuration
+    preprocess_config = None
+    if preprocess_config_path:
+        LOGGER.info(f"Loading preprocess config from: {preprocess_config_path}")
+        preprocess_config = load_config(preprocess_config_path).get('preprocess', {})
+    
+    # Load feature configuration
+    feature_config = None
+    if feature_config_path:
+        LOGGER.info(f"Loading feature config from: {feature_config_path}")
+        feature_config = load_config(feature_config_path).get('feature', {})
+    
     # Get or generate experiment name
-    # Priority: 1) train_config.experiment_name, 2) logging.tensorboard.experiment_name, 3) auto-generate
-    experiment_name = train_config.get("experiment_name")
-    if experiment_name is None:
-        if train_config.get("logging", {}).get("tensorboard", {}).get("experiment_name"):
-            experiment_name = train_config["logging"]["tensorboard"]["experiment_name"]
-        else:
-            from datetime import datetime
-            experiment_name = datetime.now().strftime("%Y%m%d_%H%M%S")
-    
+    # Priority: 1) train_config.experiment_name, 2) auto-generate
+    if train_config.get("experiment_name") is None:
+        from datetime import datetime
+        train_config["experiment_name"] = datetime.now().strftime("%Y%m%d_%H%M%S")
+
     # Create experiment directory structure: runs/{experiment_name}/
-    runs_dir = train_config.get("run_dir", "runs")
-    experiment_dir = Path(runs_dir) / experiment_name
-    experiment_dir.mkdir(parents=True, exist_ok=True)
-    LOGGER.info(f"Experiment directory: {experiment_dir}")
-    LOGGER.info(f"All logs and checkpoints will be saved under: {experiment_dir}")
-    
-    # Update checkpoint save_dir to use experiment directory: runs/{experiment_name}/checkpoints/
-    if train_config.get("checkpoint") is not None:
-        # Override save_dir to use experiment directory structure
-        train_config["checkpoint"]["save_dir"] = str(experiment_dir / "checkpoints")
-    
-    # Update tensorboard configuration
-    # TensorBoardLogger creates: log_dir / experiment_name = runs / {experiment_name}
-    if train_config.get("logging", {}).get("tensorboard") is not None:
-        train_config["logging"]["tensorboard"]["log_dir"] = "runs"
-        train_config["logging"]["tensorboard"]["experiment_name"] = experiment_name
-    
-    # Update MLflow run_name to match experiment_name if not set
-    if train_config.get("logging", {}).get("mlflow") is not None:
-        if train_config["logging"]["mlflow"].get("run_name") is None:
-            train_config["logging"]["mlflow"]["run_name"] = experiment_name
-    
-    # Store experiment name in config for reference
-    train_config["experiment_name"] = experiment_name
-    
-    # Save config files to experiment directory for reproducibility
-    import shutil
-    shutil.copy(train_config_path, experiment_dir / "train_config.yaml")
-    shutil.copy(dataset_config_path, experiment_dir / "dataset_config.yaml")
-    shutil.copy(model_config_path, experiment_dir / "model_config.yaml")
-    if preprocess_config_path and preprocess_config_path.exists():
-        shutil.copy(preprocess_config_path, experiment_dir / "preprocess_config.yaml")
-    if feature_config_path and feature_config_path.exists():
-        shutil.copy(feature_config_path, experiment_dir / "feature_config.yaml")
-    LOGGER.info(f"Config files saved to {experiment_dir}")
-    
+    runs_dir = train_config.get("run_dir") or "runs"
+    experiment_dir = Path(runs_dir) / train_config["experiment_name"]
+
     # Get device
     device_config = train_config.get("device", "cuda")
     device = get_device(device_config)
@@ -377,18 +342,18 @@ def main():
     # Create data loaders
     LOGGER.info("Creating data loaders...")
     train_loader, val_loader = create_data_loaders(
-        dataset_config_path=dataset_config_path,
+        dataset_config=dataset_config,
         data_path=str(data_path),
         train_config=train_config,
-        preprocess_config_path=preprocess_config_path,
-        feature_config_path=feature_config_path,
+        preprocess_config=preprocess_config,
+        feature_config=feature_config,
     )
     
     # Create model
     LOGGER.info("Creating model...")
     model = create_model(
-        model_config=model_config_path,
-        dataset_config_path=dataset_config_path,
+        model_config=model_config,
+        dataset_config=dataset_config,
         data_path=data_path,
         device=device
     )
@@ -399,7 +364,8 @@ def main():
         model=model,
         train_loader=train_loader,
         val_loader=val_loader,
-        config=train_config
+        config=train_config,
+        experiment_dir=experiment_dir
     )
     
     # Start training
@@ -407,7 +373,18 @@ def main():
     trainer.train()
     
     LOGGER.info("Training completed successfully!")
-
+    
+    # Saving the configuration for reproducibility
+    save_config_path = experiment_dir / "config"
+    save_config(train_config, Path(save_config_path) / "train_config.yaml")
+    save_config(dataset_config, Path(save_config_path) / "dataset_config.yaml")
+    save_config(model_config, Path(save_config_path) / "model_config.yaml")
+    if preprocess_config_path and preprocess_config_path.exists():
+        save_config(preprocess_config, Path(save_config_path) / "preprocess_config.yaml")
+    if feature_config_path and feature_config_path.exists():
+        save_config(feature_config, Path(save_config_path) / "feature_config.yaml")
+    LOGGER.info(f"Config files saved to {save_config_path}")
+    
 
 if __name__ == "__main__":
     main()

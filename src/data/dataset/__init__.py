@@ -38,7 +38,7 @@ class BaseDataset(Dataset, ABC):
     def __init__(
         self,
         data_path: str,
-        config_path: str,
+        config: dict,
         type: str = 'train',  # 'train', 'val', 'test', 'all'
     ):
         """
@@ -46,29 +46,18 @@ class BaseDataset(Dataset, ABC):
         
         Args:
             data_path: Path to dataset directory containing metadata.csv
-            config_path: Path to dataset configuration YAML file
+            config: Dataset configuration dictionary
             type: Dataset split type ('train', 'val', 'test', 'all')
         """
         # Convert to Path objects if strings are passed
         self.data_path = Path(data_path)
-        config_path = Path(config_path)
+        self.config = config
         self.type = type
 
         # Check if metadata.csv exists
         if not (self.data_path / 'metadata.csv').exists():
             raise FileNotFoundError(f"Metadata file not found at {self.data_path / 'metadata.csv'}")
-
-        # Check if config file exists
-        if not config_path.exists():
-            raise FileNotFoundError(f'Config file not found at {config_path}')
-
-        # Load config
-        with open(config_path, 'r') as f:
-            config_raw = yaml.safe_load(f)
         
-        # Extract dataset config if YAML has 'dataset' as root key
-        self.config = config_raw.get('dataset', config_raw)
-
         # Get label mapping from config
         self.load_val_label_map = self.config['labels']
         
