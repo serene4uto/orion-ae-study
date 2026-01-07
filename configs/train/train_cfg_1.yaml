@@ -91,6 +91,6 @@ train:
   max_grad_norm: null # 1.0 
   
   # Optional: Enable Automatic Mixed Precision (AMP) for faster training
-  amp: false  # Set to true to enable AMP (requires CUDA)
+  amp: true  # Set to true to enable AMP (requires CUDA)
 
   

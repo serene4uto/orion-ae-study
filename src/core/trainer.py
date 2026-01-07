@@ -1,6 +1,7 @@
 import torch
 import torch.nn as nn
 import torch.optim as optim
+from torch.amp import autocast, GradScaler
 import numpy as np
 from tqdm import tqdm
 import os
@@ -266,6 +267,16 @@ class Trainer:
         
         self.experiment_dir = Path(kwargs.get("experiment_dir"))
         
+        # Initialize AMP (Automatic Mixed Precision)
+        self.use_amp = config.get("amp", False)
+        self.scaler = GradScaler('cuda') if self.use_amp else None
+        if self.use_amp:
+            if not torch.cuda.is_available():
+                LOGGER.warning("AMP requested but CUDA not available. Disabling AMP.")
+                self.use_amp = False
+                self.scaler = None
+            else:
+                LOGGER.info("AMP (Automatic Mixed Precision) enabled")
         
         # Initialize early stopping
         if self.early_stopping is not None:
@@ -447,26 +458,46 @@ class Trainer:
             inputs = batch['final'].to(self.device, dtype=torch.float32)  # (batch_size, channels, 1, time_steps) or (batch_size, channels, height, width) for images
             labels = batch['label'].to(self.device)
 
-            # Forward pass
+            # Forward pass with AMP
             self.optimizer.zero_grad()
-            outputs = self.model(inputs)  # Model should output (batch_size, num_classes)
-
-            # Compute base loss first
-            base_loss, base_loss_components = self._compute_loss(outputs, labels)
-
-            # Add regularization for backprop
-            loss = base_loss
-            if self.l1_reg > 0.0:
-                loss += self.l1_reg * sum(torch.sum(torch.abs(p)) for p in self.model.parameters())
-
-            # Backward pass
-            loss.backward()
             
-            # Gradient clipping
-            if self.max_grad_norm is not None and self.max_grad_norm > 0:
-                torch.nn.utils.clip_grad_norm_(self.model.parameters(), self.max_grad_norm)
-            
-            self.optimizer.step()
+            if self.use_amp:
+                with autocast('cuda'):
+                    outputs = self.model(inputs)  # Model should output (batch_size, num_classes)
+                    base_loss, base_loss_components = self._compute_loss(outputs, labels)
+                    
+                    # Add regularization for backprop
+                    loss = base_loss
+                    if self.l1_reg > 0.0:
+                        loss += self.l1_reg * sum(torch.sum(torch.abs(p)) for p in self.model.parameters())
+            else:
+                outputs = self.model(inputs)  # Model should output (batch_size, num_classes)
+                base_loss, base_loss_components = self._compute_loss(outputs, labels)
+                
+                # Add regularization for backprop
+                loss = base_loss
+                if self.l1_reg > 0.0:
+                    loss += self.l1_reg * sum(torch.sum(torch.abs(p)) for p in self.model.parameters())
+
+            # Backward pass with AMP
+            if self.use_amp:
+                self.scaler.scale(loss).backward()
+                
+                # Gradient clipping (unscale first)
+                if self.max_grad_norm is not None and self.max_grad_norm > 0:
+                    self.scaler.unscale_(self.optimizer)
+                    torch.nn.utils.clip_grad_norm_(self.model.parameters(), self.max_grad_norm)
+                
+                self.scaler.step(self.optimizer)
+                self.scaler.update()
+            else:
+                loss.backward()
+                
+                # Gradient clipping
+                if self.max_grad_norm is not None and self.max_grad_norm > 0:
+                    torch.nn.utils.clip_grad_norm_(self.model.parameters(), self.max_grad_norm)
+                
+                self.optimizer.step()
             
             # Update scheduler per batch for OneCycleLR (required for 1cycle policy)
             if self.scheduler is not None:
@@ -518,9 +549,13 @@ class Trainer:
                 inputs = batch['final'].to(self.device, dtype=torch.float32)
                 labels = batch['label'].to(self.device)
 
-                outputs = self.model(inputs)
-
-                base_loss, base_loss_components = self._compute_loss(outputs, labels)
+                if self.use_amp:
+                    with autocast('cuda'):
+                        outputs = self.model(inputs)
+                        base_loss, base_loss_components = self._compute_loss(outputs, labels)
+                else:
+                    outputs = self.model(inputs)
+                    base_loss, base_loss_components = self._compute_loss(outputs, labels)
 
                 # Statistics
                 total_loss += base_loss.item()
@@ -553,6 +588,7 @@ class Trainer:
                     'optimizer': self.optimizer_cfg.get('name'),
                     'l1_reg': self.l1_reg,
                     'max_grad_norm': self.max_grad_norm,
+                    'amp': self.use_amp,
                 })
         
         # Log model graph to TensorBoard if enabled
