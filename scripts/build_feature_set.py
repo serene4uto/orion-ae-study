@@ -1,3 +1,55 @@
+#!/usr/bin/env python3
+"""
+build_feature_set.py - Extract features from frame dataset
+
+This script processes a segmented frame dataset (created by build_frame_cycle.py)
+and extracts features (e.g., CWT scalograms) for each frame, saving them to
+the processed data directory.
+
+Usage:
+------
+    python scripts/build_feature_set.py \\
+        --frame-path <path_to_frame_dataset> \\
+        --dataset-config-path <path_to_dataset_config.yaml> \\
+        --feature-config-path <path_to_feature_config.yaml> \\
+        [--preprocess-config-path <path_to_preprocess_config.yaml>] \\
+        [--save-path <output_directory>]
+
+Arguments:
+----------
+    --frame-path            Path to segmented frame dataset directory
+                            (created by build_frame_cycle.py)
+    --dataset-config-path   Path to dataset config YAML (defines channels, labels, splits)
+    --feature-config-path   Path to feature extraction config YAML (defines feature transforms)
+    --preprocess-config-path (Optional) Path to preprocessing config YAML (filters, norms)
+    --save-path             (Optional) Output directory (default: data/processed)
+
+Example:
+--------
+    # Basic usage with CWT scalogram features
+    python scripts/build_feature_set.py \\
+        --frame-path data/raw/segmented_cycles_positive_c1_l42373_c_A_B_C_D_20260107_205752 \\
+        --dataset-config-path configs/dataset/example_1.yaml \\
+        --feature-config-path configs/feature/feature_cwt_scalogram_gmw.yaml
+
+    # With preprocessing and custom save path
+    python scripts/build_feature_set.py \\
+        --frame-path data/raw/segmented_cycles_positive_c1_l42373_c_A_B_C_D_20260107_205752 \\
+        --dataset-config-path configs/dataset/example_1.yaml \\
+        --feature-config-path configs/feature/feature_cwt_scalogram_gmw.yaml \\
+        --preprocess-config-path configs/preprocess/preprocess_exp1.yaml \\
+        --save-path data/processed/my_features
+
+Output:
+-------
+    Creates a directory structure:
+        data/processed/{dataset_name}_features_{timestamp}/
+            data/
+                {filename}_features.npy   # Feature dict for each file
+            metadata.csv                  # Copy from source dataset
+            dataset_info.json             # Updated with selected channels
+            feature_info.json             # Feature extraction metadata
+"""
 
 from pathlib import Path
 import sys
@@ -165,7 +217,7 @@ def save_features_dataset(
     # Process each file
     for file_idx, file_path in enumerate(tqdm(dataset.file_paths, desc="Processing files")):
         # Load all frames from this file
-        raw_data = dataset._load_data(file_path)  # Shape: (num_frames, time_steps, channels)
+        raw_data, _ = dataset._load_data(file_path)  # Shape: (num_frames, time_steps, channels)
         
         # Process each frame
         file_features = []
@@ -187,10 +239,10 @@ def save_features_dataset(
                 preprocessed = preprocessed[:, np.newaxis, :]
             
             # Extract features
-            features = dataset._extract_features(preprocessed)  # dict of features
+            extracted_features = dataset._extract_features(preprocessed)  # dict of features
             
             # Store features for this frame
-            file_features.append(features)
+            file_features.append(extracted_features)
         
         # Save all frames' features for this file
         # Use original filename with _features suffix
@@ -300,7 +352,7 @@ def main():
     dataset = get_dataset(
         dataset_type,
         data_path=str(args.frame_path),
-        config_path=str(args.dataset_config_path),
+        config=dataset_config,
         type='all',  # Process all data regardless of splits
         preprocess_pipeline=preprocess_pipeline,
         feature_pipeline=feature_pipeline,
