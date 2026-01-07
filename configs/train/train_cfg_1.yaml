@@ -69,7 +69,7 @@ train:
       enabled: true
       log_interval: 10  # Log every N batches (optional)
       log_graph: true  # Log model computational graph (optional)
-      log_histograms: false  # Log weight histograms (can be expensive)
+      log_weights: false  # Log weight histograms (can be expensive)
       log_images: false  # Log sample images (if applicable)
     
     # Common settings

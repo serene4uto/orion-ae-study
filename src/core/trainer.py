@@ -94,7 +94,7 @@ class TensorBoardLogger:
         self.writer = SummaryWriter(str(self.log_dir))
         self.log_interval = config.get("log_interval", 10)
         self.log_graph = config.get("log_graph", False)
-        self.log_histograms = config.get("log_histograms", False)
+        self.log_weights = config.get("log_weights", False)
         self.batch_count = 0
         
         LOGGER.info(f"TensorBoard logging initialized at {self.log_dir}")
@@ -116,9 +116,9 @@ class TensorBoardLogger:
             except Exception as e:
                 LOGGER.warning(f"Failed to log model graph: {e}")
     
-    def log_histograms(self, model, epoch):
+    def log_weight_histograms(self, model, epoch):
         """Log weight histograms."""
-        if self.log_histograms:
+        if self.log_weights:
             for name, param in model.named_parameters():
                 self.writer.add_histogram(name, param, epoch)
     
@@ -656,8 +656,8 @@ class Trainer:
             for logger in self.loggers:
                 if isinstance(logger, TensorBoardLogger):
                     logger.log_metrics(metrics, epoch_idx)
-                    if logger.log_histograms:
-                        logger.log_histograms(self.model, epoch_idx)
+                    if logger.log_weights:
+                        logger.log_weight_histograms(self.model, epoch_idx)
                 elif isinstance(logger, MLflowLogger):
                     logger.log_metrics(metrics, epoch_idx)
 

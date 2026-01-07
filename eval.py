@@ -16,6 +16,7 @@ Note: --split defaults to "test" if not specified, so you typically don't need t
 """
 
 import argparse
+import inspect
 import yaml
 import torch
 import torch.nn.functional as F
@@ -38,13 +39,8 @@ from sklearn.metrics import (
 from src.core.trainer import Trainer
 from src.data.dataset import get_dataset, list_datasets
 from src.data.transforms import preprocessing
-from src.data.transforms import (
-    PreprocessPipeline,
-    FilterPipeline,
-    NormPipeline,
-    MiscPipeline,
-)
-from src.models import get_model
+from src.data.transforms import PreprocessPipeline
+from src.models import get_model, MODEL_REGISTRY
 from src.utils import loss
 from src.utils import LOGGER
 
@@ -144,7 +140,7 @@ def create_preprocessing_pipeline(preprocess_config):
             LOGGER.warning(f"Invalid misc config format: {misc_cfg}. Expected dict.")
     
     return PreprocessPipeline(
-        filters=FilterPipeline(filters), norms=NormPipeline(norms), miscs=MiscPipeline(miscs)
+        filters=filters, norms=norms, miscs=miscs
     )
 
 
@@ -246,7 +242,7 @@ def create_eval_dataset(dataset_config_path, data_path, split, preprocess_config
     return dataset, dataset_cfg
 
 
-def create_model_from_config(model_config_path, dataset_config_path, device):
+def create_model_from_config(model_config_path, dataset_config_path, device, eval_dataset=None):
     """
     Create model from configuration (same as train.py).
     
@@ -254,9 +250,10 @@ def create_model_from_config(model_config_path, dataset_config_path, device):
         model_config_path: Path to model config YAML
         dataset_config_path: Path to dataset config YAML
         device: Device to create model on
+        eval_dataset: Optional dataset for auto-detecting in_channels
     
     Returns:
-        Model instance
+        Model instance and labels dict
     """
     model_config_data = load_config(model_config_path)
     
@@ -267,15 +264,11 @@ def create_model_from_config(model_config_path, dataset_config_path, device):
         model_cfg = model_config_data
     
     model_name = model_cfg['model_name']
-    model_params = model_cfg.get('params', {})
+    model_params = model_cfg.get('params', {}).copy()  # Copy to avoid modifying original
     
     # Get input shape from dataset config
     dataset_config = load_config(dataset_config_path)
     dataset_cfg = dataset_config.get('dataset', dataset_config)
-    
-    # Get number of channels from dataset config
-    channels = dataset_cfg.get('channels', ['A', 'B', 'C', 'D'])
-    num_channels = len(channels)
     
     # Get number of classes from dataset config labels
     labels = dataset_cfg.get('labels', {})
@@ -285,9 +278,22 @@ def create_model_from_config(model_config_path, dataset_config_path, device):
     if 'num_classes' not in model_params:
         model_params['num_classes'] = num_classes
     
-    # Override in_channels from dataset config if the model accepts it
-    if 'in_channels' in model_params:
-        model_params['in_channels'] = num_channels
+    # Auto-detect in_channels from actual data if model accepts it
+    model_class = MODEL_REGISTRY.get(model_name)
+    if model_class is not None:
+        sig = inspect.signature(model_class.__init__)
+        if 'in_channels' in sig.parameters:
+            if eval_dataset is not None and len(eval_dataset) > 0:
+                # Auto-detect from actual data shape
+                sample = eval_dataset[0]
+                in_channels = sample['final'].shape[0]  # Shape: (C, H, W) or (C, 1, T)
+                model_params['in_channels'] = in_channels
+                LOGGER.info(f"Auto-detected in_channels={in_channels} from dataset sample")
+            else:
+                # Fallback to dataset config channels
+                channels = dataset_cfg.get('channels', ['A', 'B', 'C', 'D'])
+                model_params['in_channels'] = len(channels)
+                LOGGER.info(f"Set in_channels={len(channels)} from dataset config")
     
     LOGGER.info(f"Creating model: {model_name}")
     LOGGER.info(f"Model parameters: {model_params}")
@@ -683,14 +689,7 @@ def main():
     if criterion_config is None:
         criterion_config = [{'name': 'nn.CrossEntropyLoss', 'weight': 1.0, 'params': {}}]
     
-    # Create model
-    LOGGER.info("Creating model...")
-    model, labels = create_model_from_config(model_config_path, dataset_config_path, device)
-    
-    # Load checkpoint
-    checkpoint_info = load_checkpoint(checkpoint_path, model, device)
-    
-    # Create evaluation dataset
+    # Create evaluation dataset first (needed for auto-detecting in_channels)
     LOGGER.info("Creating evaluation dataset...")
     dataset, dataset_cfg = create_eval_dataset(
         dataset_config_path=dataset_config_path,
@@ -698,6 +697,13 @@ def main():
         split=args.split,
         preprocess_config_path=args.preprocess_config,
     )
+    
+    # Create model (pass dataset for auto-detecting in_channels)
+    LOGGER.info("Creating model...")
+    model, labels = create_model_from_config(model_config_path, dataset_config_path, device, eval_dataset=dataset)
+    
+    # Load checkpoint
+    checkpoint_info = load_checkpoint(checkpoint_path, model, device)
     
     # Create data loader
     data_loader = torch.utils.data.DataLoader(

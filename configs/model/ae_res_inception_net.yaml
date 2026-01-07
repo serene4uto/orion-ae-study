@@ -1,6 +1,7 @@
 model:
   model_name: ae_res_inception_net
   params:
+    in_channels: 4                     # Number of input channels (matches dataset channels)
     num_classes: 7                     # Number of output classes
     stem_kernel: 15                    # Stem convolution kernel size (height dimension)
     stem_downsampling: 5               # Stem stride for downsampling

@@ -12,6 +12,7 @@ Usage:
 """
 
 import argparse
+import inspect
 import yaml
 import torch
 from torch.utils.data import DataLoader
@@ -20,13 +21,8 @@ from pathlib import Path
 from src.core.trainer import Trainer
 from src.data.dataset import get_dataset, list_datasets
 from src.data.transforms import preprocessing
-from src.data.transforms import (
-    PreprocessPipeline,
-    FilterPipeline,
-    NormPipeline,
-    MiscPipeline,
-)
-from src.models import get_model
+from src.data.transforms import PreprocessPipeline
+from src.models import get_model, MODEL_REGISTRY
 from src.utils import LOGGER
 
 
@@ -122,7 +118,7 @@ def create_preprocessing_pipeline(preprocess_config):
             LOGGER.warning(f"Invalid misc config format: {misc_cfg}. Expected dict.")
     
     return PreprocessPipeline(
-        filters=FilterPipeline(filters), norms=NormPipeline(norms), miscs=MiscPipeline(miscs)
+        filters=filters, norms=norms, miscs=miscs
     )
 
 def create_data_loaders(dataset_config, data_path, train_config, 
@@ -199,15 +195,11 @@ def create_data_loaders(dataset_config, data_path, train_config,
     return train_loader, val_loader
 
 
-def create_model(model_config, dataset_config, data_path, device):
+def create_model(model_config, dataset_config, data_path, device, train_dataset=None):
     """Create model from configuration."""
     model_config_data = model_config.get('model', model_config)
     model_name = model_config_data['model_name']
-    model_params = model_config_data.get('params', {})
-    
-    # Get number of channels from dataset config
-    channels = dataset_config.get('channels', ['A', 'B', 'C', 'D'])
-    num_channels = len(channels)
+    model_params = model_config_data.get('params', {}).copy()  # Copy to avoid modifying original
     
     # Get number of classes from dataset config labels
     labels = dataset_config.get('labels', {})
@@ -217,11 +209,22 @@ def create_model(model_config, dataset_config, data_path, device):
     if 'num_classes' not in model_params:
         model_params['num_classes'] = num_classes
     
-    # Always override in_channels from dataset config (dataset config is source of truth)
-    # This ensures the model matches the actual number of channels in the data
-    # Only set in_channels if it's already defined in model_params (model accepts it)
-    if 'in_channels' in model_params:
-        model_params['in_channels'] = num_channels
+    # Auto-detect in_channels from actual data if model accepts it
+    model_class = MODEL_REGISTRY.get(model_name)
+    if model_class is not None:
+        sig = inspect.signature(model_class.__init__)
+        if 'in_channels' in sig.parameters:
+            if train_dataset is not None and len(train_dataset) > 0:
+                # Auto-detect from actual data shape
+                sample = train_dataset[0]
+                in_channels = sample['final'].shape[0]  # Shape: (C, H, W) or (C, 1, T)
+                model_params['in_channels'] = in_channels
+                LOGGER.info(f"Auto-detected in_channels={in_channels} from dataset sample")
+            else:
+                # Fallback to dataset config channels
+                channels = dataset_config.get('channels', ['A', 'B', 'C', 'D'])
+                model_params['in_channels'] = len(channels)
+                LOGGER.info(f"Set in_channels={len(channels)} from dataset config")
     
     LOGGER.info(f"Creating model: {model_name}")
     LOGGER.info(f"Model parameters: {model_params}")
@@ -349,13 +352,14 @@ def main():
         feature_config=feature_config,
     )
     
-    # Create model
+    # Create model (pass dataset for auto-detecting in_channels)
     LOGGER.info("Creating model...")
     model = create_model(
         model_config=model_config,
         dataset_config=dataset_config,
         data_path=data_path,
-        device=device
+        device=device,
+        train_dataset=train_loader.dataset
     )
     
     # Initialize trainer
