@@ -181,4 +181,4 @@ class SimpleCNN(BaseModel):
 
 # Import models to register them
 from src.models import ae_res_inception_net  # noqa: F401
-from src.models import efficientnet_b5  # noqa: F401
+from src.models import efficientnet  # noqa: F401  # Registers both efficientnet_b0 and efficientnet_b5
