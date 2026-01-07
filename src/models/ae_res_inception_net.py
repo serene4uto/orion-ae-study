@@ -115,7 +115,9 @@ class InceptionBlock(nn.Module):
     def out_channels(self):
         return self.bn.num_features
 
-class ClassifierHead(BaseModel):
+class ClassifierHead(nn.Module):
+    """Classifier head component with Global Average Pooling and FC layers."""
+    
     def __init__(
         self,
         in_channels: int,

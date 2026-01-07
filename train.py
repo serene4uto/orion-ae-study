@@ -222,7 +222,7 @@ def create_model(model_config, dataset_config, data_path, device, train_dataset=
                 LOGGER.info(f"Auto-detected in_channels={in_channels} from dataset sample")
             else:
                 # Fallback to dataset config channels
-                channels = dataset_config.get('channels', ['A', 'B', 'C', 'D'])
+                channels = dataset_config.get('channels', ['A', 'B', 'C'])
                 model_params['in_channels'] = len(channels)
                 LOGGER.info(f"Set in_channels={len(channels)} from dataset config")
     
