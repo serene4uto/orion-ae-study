@@ -72,17 +72,6 @@ train:
       log_histograms: false  # Log weight histograms (can be expensive)
       log_images: false  # Log sample images (if applicable)
     
-    # mlflow:
-    #   enabled: false
-    #   tracking_uri: null  # null uses default (local ./mlruns), or set to remote URI
-    #   experiment_name: "orion-ae-study"  # MLflow experiment name
-    #   run_name: null  # null will auto-generate, or set custom name
-    #   log_artifacts: true  # Log model checkpoints, configs, etc.
-    #   log_model: true  # Log the model itself for MLflow model registry
-    #   tags: {}  # Optional: custom tags as key-value pairs
-    #   params: {}  # Optional: hyperparameters to log (auto-logged from config)
-    #   metrics_prefix: ""  # Optional: prefix for metric names (e.g., "train/", "val/")
-    
     # Common settings
     log_interval: 10  # Log metrics every N batches (if not specified per logger)
     log_epoch_interval: 1  # Log metrics every N epochs

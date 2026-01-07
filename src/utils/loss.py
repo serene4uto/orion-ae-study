@@ -24,15 +24,16 @@ class POM1bLoss(nn.Module):
     
     The loss works by:
     1. Computing softmax probabilities from logits
-    2. For each sample, summing probabilities of the true class and its adjacent classes (y-1, y, y+1)
-    3. Computing negative log-likelihood of this sum
+    2. For each sample, summing the LOG probabilities of the true class and its adjacent classes (k-1, k, k+1)
+    3. Negating this sum
     
-    This encourages the model to concentrate probability mass around the true class
-    and its neighbors, which is appropriate for ordinal classification.
+    Mathematically: L = -[log P(k-1) + log P(k) + log P(k+1)]
+    
+    This encourages the model to assign high probability to the true class
+    and its neighbors, appropriate for ordinal classification.
     
     Args:
         num_classes: Number of ordinal classes (default: 7)
-        eps: Epsilon value for numerical stability (default: 1e-10)
     
     Example:
         >>> loss_fn = POM1bLoss(num_classes=7)
@@ -41,14 +42,13 @@ class POM1bLoss(nn.Module):
         >>> loss = loss_fn(logits, targets)
     """
     
-    def __init__(self, num_classes=7, eps=1e-10):
+    def __init__(self, num_classes=7):
         super(POM1bLoss, self).__init__()
         self.num_classes = num_classes
-        self.eps = eps
     
     def forward(self, logits, targets):
         """
-        Compute POM1b ordinal loss.
+        Compute POM1b ordinal loss (vectorized implementation).
         
         POM1b loss formula:
         L = - sum_{i} sum_{l in {-1,0,1}} log P_i(k-l)
@@ -61,25 +61,29 @@ class POM1bLoss(nn.Module):
         Returns:
             loss: Scalar loss value
         """
-        # Convert logits to probabilities
-        probs = F.softmax(logits, dim=1)  # [batch_size, num_classes]
-        batch_size = logits.size(0)
+        # Use log_softmax for numerical stability (avoids log(softmax()) which can underflow)
+        log_probs = F.log_softmax(logits, dim=1)  # [batch_size, num_classes]
         
-        loss = 0.0
-        for i in range(batch_size):
-            k = targets[i].item()
-            
-            # Collect log P_i(k-l) for l in {-1,0,1} within bounds
-            log_terms = []
-            for l in (-1, 0, 1):
-                cls = k - l
-                if 0 <= cls < self.num_classes:
-                    log_terms.append(torch.log(probs[i, cls] + self.eps))
-            
-            # Sum log terms: -sum(log(P)) = -log(prod(P))
-            loss += -sum(log_terms)
+        # Prepare indices: k, k-1, k+1 (clamped to valid range for gather)
+        k = targets.unsqueeze(1)  # [batch_size, 1]
+        k_minus_1 = (k - 1).clamp(0, self.num_classes - 1)
+        k_plus_1 = (k + 1).clamp(0, self.num_classes - 1)
         
-        return loss / batch_size
+        # Gather log probabilities for each class
+        log_p_k = log_probs.gather(1, k).squeeze(1)  # [batch_size]
+        log_p_k_minus_1 = log_probs.gather(1, k_minus_1).squeeze(1)  # [batch_size]
+        log_p_k_plus_1 = log_probs.gather(1, k_plus_1).squeeze(1)  # [batch_size]
+        
+        # Masks for valid neighbors (boundary handling)
+        mask_k_minus_1 = (targets > 0).float()  # k-1 valid when k > 0
+        mask_k_plus_1 = (targets < self.num_classes - 1).float()  # k+1 valid when k < K-1
+        
+        # Sum log probabilities: always include k, conditionally include neighbors
+        loss_per_sample = -(log_p_k + 
+                           mask_k_minus_1 * log_p_k_minus_1 + 
+                           mask_k_plus_1 * log_p_k_plus_1)
+        
+        return loss_per_sample.mean()
 
 
 # Alias for convenience

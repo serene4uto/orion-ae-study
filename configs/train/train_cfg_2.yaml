@@ -1,0 +1,62 @@
+train:
+  run_dir: null
+  experiment_name: null
+  
+  # Device configuration
+  device: "cuda"
+  
+  # Increased epochs as ordinal loss usually requires more time to settle
+  num_epochs: 50 
+  
+  # Increased batch size to 16 for more stable gradient estimates
+  batch_size: 16
+
+  num_workers: 4
+  pin_memory: true
+  
+  criterion:
+    - name: "POM1bLoss"
+      weight: 1.0
+      params:
+  
+  optimizer:
+    name: "Adam"
+    # Lowered LR significantly (0.001 -> 0.0002) to prevent divergence
+    lr: 0.0002 
+    params:
+      weight_decay: 0.0001
+      betas: [0.9, 0.999]
+      eps: 1e-8
+  
+  scheduler:
+    # Changed to CosineAnnealing for a smoother decay throughout training
+    name: "CosineAnnealingLR"
+    params:
+      T_max: 50  # Should match num_epochs
+      eta_min: 1e-6 # Minimum learning rate
+  
+  l1_reg: 0.0
+
+  early_stopping:
+    patience: 12
+    min_delta: 0.001
+    monitor: "val/loss" 
+
+  checkpoint:
+    monitor: "val/loss"
+    save_best: true
+    save_every_n_epochs: 10
+
+  logging:
+    tensorboard:
+      enabled: true
+      log_interval: 10
+      log_graph: true
+    log_interval: 10
+    log_epoch_interval: 1
+  
+  # CRITICAL: Enabled gradient clipping to 1.0 to prevent exploding gradients
+  max_grad_norm: 1.0 
+  
+  # Mixed precision helps speed up training on modern GPUs
+  amp: true

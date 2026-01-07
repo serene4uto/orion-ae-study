@@ -331,6 +331,35 @@ class Trainer:
         if not isinstance(scheduler_params, dict):
             raise ValueError("Scheduler 'params' must be a dictionary")
 
+        # Convert string numbers to proper types (same logic as _init_optimizer)
+        converted_params = {}
+        for key, value in scheduler_params.items():
+            if isinstance(value, str):
+                # Try to convert string to number
+                try:
+                    # Try float first (handles both int and float strings, including scientific notation)
+                    if '.' in value or 'e' in value.lower() or 'E' in value:
+                        converted_params[key] = float(value)
+                    else:
+                        # Try int, fallback to float
+                        try:
+                            converted_params[key] = int(value)
+                        except ValueError:
+                            converted_params[key] = float(value)
+                except ValueError:
+                    # If conversion fails, keep as string (might be a valid string param)
+                    converted_params[key] = value
+            elif isinstance(value, list):
+                # Convert list elements if they're strings
+                converted_params[key] = [
+                    float(v) if isinstance(v, str) and ('.' in v or 'e' in v.lower() or 'E' in v) 
+                    else (int(v) if isinstance(v, str) else v)
+                    for v in value
+                ]
+            else:
+                converted_params[key] = value
+        scheduler_params = converted_params
+
         # Special handling for OneCycleLR: calculate total_steps if not provided
         if scheduler_name == "OneCycleLR":
             if "total_steps" not in scheduler_params or scheduler_params["total_steps"] is None:
