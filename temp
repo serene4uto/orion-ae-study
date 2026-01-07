@@ -8,3 +8,6 @@ python scripts/build_feature_set.py --frame-path data/raw/segmented_cycles_posit
 
 
 python eval.py     --checkpoint runs/20260107_020952/checkpoints/best_model.pt     --dataset_config runs/20260107_020952/config/dataset_config.yaml     --model_config runs/20260107_020952/config/model_config.yaml     --data_path data/processed/example_1_features_20251222_183540     --split test
+
+
+python train.py --train_config configs/train/train_example3.yaml --dataset_config configs/dataset/cwt_scalogram_A_e.yaml --model_config configs/model/efficientnet_b5.yaml --data_path data/processed/example_1_features_20251222_183540

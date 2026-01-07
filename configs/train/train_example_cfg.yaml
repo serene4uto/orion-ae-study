@@ -1,9 +1,13 @@
 train:
+  run_dir: null
+
+  experiment_name: null
+  
   # Device to use for training ('cuda', 'cpu', or 'auto')
   device: "cuda"
   
   # Number of training epochs
-  num_epochs: 10
+  num_epochs: 20
   
   # Batch size for training and validation
   batch_size: 8
@@ -18,7 +22,12 @@ train:
   criterion:
     - name: "POM1bLoss"
       weight: 1.0
-      params:
+      params: null
+        # Optional: specify class weights if needed
+        # weight: [1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0]
+    - name: "nn.CrossEntropyLoss"
+      weight: 1.0
+      params: null
         # Optional: specify class weights if needed
         # weight: [1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0]
   
@@ -50,7 +59,6 @@ train:
   # Optional: Checkpointing
   checkpoint:
     monitor: "val/loss" # or "val/acc"
-    save_dir: "runs/checkpoints"
     save_best: true
     save_every_n_epochs: 10
 
@@ -59,30 +67,28 @@ train:
     # Enable/disable specific loggers
     tensorboard:
       enabled: true
-      log_dir: "runs/tensorboard"
-      experiment_name: null  # null will auto-generate from timestamp
       log_interval: 10  # Log every N batches (optional)
       log_graph: true  # Log model computational graph (optional)
       log_histograms: false  # Log weight histograms (can be expensive)
       log_images: false  # Log sample images (if applicable)
     
-    mlflow:
-      enabled: true
-      tracking_uri: null  # null uses default (local ./mlruns), or set to remote URI
-      experiment_name: "orion-ae-study"  # MLflow experiment name
-      run_name: null  # null will auto-generate, or set custom name
-      log_artifacts: true  # Log model checkpoints, configs, etc.
-      log_model: true  # Log the model itself for MLflow model registry
-      tags: {}  # Optional: custom tags as key-value pairs
-      params: {}  # Optional: hyperparameters to log (auto-logged from config)
-      metrics_prefix: ""  # Optional: prefix for metric names (e.g., "train/", "val/")
+    # mlflow:
+    #   enabled: false
+    #   tracking_uri: null  # null uses default (local ./mlruns), or set to remote URI
+    #   experiment_name: "orion-ae-study"  # MLflow experiment name
+    #   run_name: null  # null will auto-generate, or set custom name
+    #   log_artifacts: true  # Log model checkpoints, configs, etc.
+    #   log_model: true  # Log the model itself for MLflow model registry
+    #   tags: {}  # Optional: custom tags as key-value pairs
+    #   params: {}  # Optional: hyperparameters to log (auto-logged from config)
+    #   metrics_prefix: ""  # Optional: prefix for metric names (e.g., "train/", "val/")
     
     # Common settings
     log_interval: 10  # Log metrics every N batches (if not specified per logger)
     log_epoch_interval: 1  # Log metrics every N epochs
   
   # Optional: Gradient clipping
-  max_grad_norm: 1.0
+  max_grad_norm: null # 1.0 
   
 
   
