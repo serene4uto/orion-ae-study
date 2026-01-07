@@ -488,6 +488,81 @@ def segment_stream(stream_data: np.ndarray, frame_length: int, frame_start_idx: 
     return np.array(frames) if frames else np.empty((0, frame_length, stream_data.shape[1]))
 
 
+def segment_stream_with_events(
+    stream_data: np.ndarray,
+    frame_length: int,
+    frame_start_idx: list[int],
+    cycles: list[tuple],
+    cycles_per_frame: int
+) -> tuple:
+    """
+    Divide continuous stream into fixed-length frames and extract cycle events.
+    
+    Args:
+        stream_data: (N, num_channels) array - multi-channel signal
+        frame_length: length of one frame in samples
+        frame_start_idx: list of first indices of frames
+        cycles: List of cycle tuples (start_idx, pos_peak_idx, mid_zero_idx, neg_peak_idx, end_idx, cycle_length)
+        cycles_per_frame: Number of cycles per frame
+    
+    Returns:
+        tuple: (frames, events) where
+            - frames: (num_frames, frame_length, num_channels) array
+            - events: (num_frames, 3) array with [positive_peak, mid_zero, negative_peak] indices relative to frame start
+    """
+    frames = []
+    events_list = []
+    signal_length = len(stream_data)
+    
+    # Create a mapping from cycle start index to cycle tuple for quick lookup
+    cycle_dict = {cycle[0]: cycle for cycle in cycles}
+    
+    for start_idx in frame_start_idx:
+        end_idx = start_idx + frame_length
+        if end_idx > signal_length:
+            # Skip frames that would go beyond signal length
+            continue
+        frame = stream_data[start_idx:end_idx]
+        if len(frame) == frame_length:  # Only add complete frames
+            frames.append(frame)
+            
+            # Extract events from the first cycle in this frame
+            # Frame start should match a cycle start
+            if start_idx in cycle_dict:
+                cycle = cycle_dict[start_idx]
+                # Cycle tuple: (start_idx, pos_peak_idx, mid_zero_idx, neg_peak_idx, end_idx, cycle_length)
+                pos_peak_abs = cycle[1]
+                mid_zero_abs = cycle[2]
+                neg_peak_abs = cycle[3]
+                
+                # Convert to relative indices (within frame)
+                pos_peak_rel = pos_peak_abs - start_idx
+                mid_zero_rel = mid_zero_abs - start_idx
+                neg_peak_rel = neg_peak_abs - start_idx
+                
+                # Validate events are within frame bounds
+                if 0 <= pos_peak_rel < frame_length and \
+                   0 <= mid_zero_rel < frame_length and \
+                   0 <= neg_peak_rel < frame_length:
+                    events_list.append([pos_peak_rel, mid_zero_rel, neg_peak_rel])
+                else:
+                    # Events outside frame bounds, use -1 as placeholder
+                    logger.warning(
+                        f"Cycle events outside frame bounds for frame starting at {start_idx}. "
+                        f"Using placeholder values."
+                    )
+                    events_list.append([-1, -1, -1])
+            else:
+                # No matching cycle found, use -1 as placeholder
+                logger.warning(f"No cycle found for frame starting at {start_idx}. Using placeholder values.")
+                events_list.append([-1, -1, -1])
+    
+    frames_array = np.array(frames) if frames else np.empty((0, frame_length, stream_data.shape[1]))
+    events_array = np.array(events_list, dtype=np.int32) if events_list else np.empty((0, 3), dtype=np.int32)
+    
+    return frames_array, events_array
+
+
 def parse_args():
     parser = argparse.ArgumentParser(
         description="Convert .mat files to segmented .npy files"
@@ -551,6 +626,12 @@ def parse_args():
         default=4,
         help='Butterworth filter order for vibration signal preprocessing (default: 4)'
     )
+    parser.add_argument(
+        '--no-save-events',
+        dest='save_events',
+        action='store_false',
+        help='Disable saving cycle event timestamps (default: events are saved)'
+    )
     return parser.parse_args()
 
 
@@ -563,7 +644,8 @@ def convert_and_segment_dataset(
     cycles_length: int,
     channels: list[str],
     filter_cutoff_hz: float = 1000.0,
-    filter_order: int = 4
+    filter_order: int = 4,
+    save_events: bool = True
 ):
     """
     Convert raw .mat files to segmented .npy files based on vibration cycles.
@@ -578,6 +660,7 @@ def convert_and_segment_dataset(
         channels: List of channel names to extract
         filter_cutoff_hz: Low-pass filter cutoff frequency in Hz for vibration signal preprocessing (default: 1000.0)
         filter_order: Butterworth filter order for vibration signal preprocessing (default: 4)
+        save_events: If True, save cycle event timestamps alongside frames (default: True)
     """
     
     # Mapping load string -> (class, value)
@@ -734,8 +817,22 @@ def convert_and_segment_dataset(
                     cycle_list, skip, cycles_per_frame
                 )
 
-            # Segment stream into frames: (num_frames, frame_length, num_channels)
-            segmented_data = segment_stream(signal, frame_length, frame_start_idx)
+            # Segment stream into frames (with or without events)
+            if save_events:
+                # Use appropriate cycle list for each frame
+                if cycle_start_phase == 'both':
+                    # Combine both cycle lists for lookup
+                    all_cycles = cycles[0] + cycles[1]
+                else:
+                    all_cycles = cycles[0]
+                
+                segmented_data, frame_events = segment_stream_with_events(
+                    signal, frame_length, frame_start_idx, all_cycles, cycles_per_frame
+                )
+            else:
+                segmented_data = segment_stream(signal, frame_length, frame_start_idx)
+                frame_events = None
+            
             num_frames = segmented_data.shape[0]
             
             # Create unique file ID: number chunks sequentially within this (series, load_class) combination
@@ -748,6 +845,15 @@ def convert_and_segment_dataset(
             
             # Save all frames from this .mat file as single .npy
             np.save(npy_path, segmented_data)
+            
+            # Save cycle events if requested
+            if save_events:
+                events_path = target_root / "data" / f"{file_id}_events.npy"
+                # Save cycle events: (num_frames, 3) with [positive_peak, mid_zero, negative_peak] indices
+                np.save(events_path, frame_events)
+                logger.debug(f"Saved {num_frames} frames and events to {npy_path.name} and {events_path.name}")
+            else:
+                logger.debug(f"Saved {num_frames} frames to {npy_path.name}")
             
             # Append metadata (only file-specific fields, dataset-level fields go to dataset_info.json)
             metadata.append({
@@ -786,6 +892,8 @@ def convert_and_segment_dataset(
     logger.info(f"    Series: {sorted(df['series'].unique().tolist())}")
     logger.info(f"    Loads: {sorted(df['load_class'].unique().tolist())}")
     logger.info(f"    Metadata saved to: {csv_path}")
+    if save_events:
+        logger.info(f"    Cycle events saved alongside frame data (suffix: _events.npy)")
     
     # Save dataset info (dataset_info.json)
     # Get frame info from first entry if available
@@ -803,10 +911,21 @@ def convert_and_segment_dataset(
         "cycles_per_frame": int(cycles_per_frame),
         "cycles_start_phase": cycle_start_phase,
         "cycles_skip": [int(x) for x in skip_cycles],
+        "has_cycle_events": save_events,
         "loads": {
             int(load_class): float(load_val) for load_str, (load_class, load_val) in load_map.items()
         }
     }
+    
+    # Add cycle events info only if events were saved
+    if save_events:
+        dataset_info["cycle_events"] = {
+            "description": "Cycle event timestamps (positive_peak, mid_zero, negative_peak) relative to frame start",
+            "file_suffix": "_events.npy",
+            "shape": "(num_frames, 3)",
+            "events": ["positive_peak", "mid_zero", "negative_peak"],
+            "note": "Event indices are relative to frame start (0-indexed). Use -1 if event not found."
+        }
     
     info_path = target_root / "dataset_info.json"
     with open(info_path, 'w') as f:
@@ -863,6 +982,7 @@ def main():
     logger.info(f"Skip cycles: {args.skip_cycles}")
     logger.info(f"Filter cutoff frequency: {args.filter_cutoff_hz} Hz")
     logger.info(f"Filter order: {args.filter_order}")
+    logger.info(f"Save cycle events: {args.save_events}")
     
     if not args.input_dir.exists():
         logger.error(f"Input directory does not exist: {args.input_dir}")
@@ -877,7 +997,8 @@ def main():
         cycles_length=args.cycles_length,
         channels=args.channels,
         filter_cutoff_hz=args.filter_cutoff_hz,
-        filter_order=args.filter_order
+        filter_order=args.filter_order,
+        save_events=args.save_events
     )
 
 

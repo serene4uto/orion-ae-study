@@ -69,6 +69,9 @@ class OrionAEFrameDataset(BaseDataset):
             file_num_frames = self.metadata.loc[self.metadata['file_path'] == file_path, 'num_frames'].values[0]
             self.file_num_frames.append(file_num_frames)
             cumulative_offset += file_num_frames
+        
+        # Cache for events data (file_path -> events_array) to avoid reloading
+        self._events_cache = {}
 
     def _select_channels(self, data: np.ndarray) -> np.ndarray:
         """
@@ -119,19 +122,55 @@ class OrionAEFrameDataset(BaseDataset):
         # Apply feature pipeline
         return self.feature_pipeline(data)
 
-    def _load_data(self, file_path: str) -> np.ndarray:
+    def _load_events(self, file_path: str) -> Optional[np.ndarray]:
         """
-        Loads the data from a file.
+        Loads cycle events from a file if it exists (with caching).
         
         Args:
             file_path: Relative path to the data file from self.data_path
-            
+        
         Returns:
-            Loaded numpy array
+            Events array with shape (num_frames, 3) or None if events file doesn't exist
+        """
+        # Check cache first
+        if file_path in self._events_cache:
+            return self._events_cache[file_path]
+        
+        # Resolve relative file_path to absolute path relative to data_path
+        full_path = self.data_path / file_path
+        
+        # Events file has _events suffix before .npy
+        events_path = full_path.parent / f"{full_path.stem}_events.npy"
+        
+        if events_path.exists():
+            events = np.load(events_path)
+            self._events_cache[file_path] = events
+            return events
+        
+        # Cache None to avoid repeated file system checks
+        self._events_cache[file_path] = None
+        return None
+
+    def _load_data(self, file_path: str) -> tuple[np.ndarray, Optional[np.ndarray]]:
+        """
+        Loads the data and events from a file.
+        
+        Args:
+            file_path: Relative path to the data file from self.data_path
+        
+        Returns:
+            tuple: (data, events) where:
+                - data: Loaded numpy array with frames
+                - events: Events array with shape (num_frames, 3) or None if not available
         """
         # Resolve relative file_path to absolute path relative to data_path
         full_path = self.data_path / file_path
-        return np.load(full_path)
+        data = np.load(full_path)
+        
+        # Try to load events
+        events = self._load_events(file_path)
+        
+        return data, events
         
     def _locate_file_and_frame_index(self, index: int) -> tuple[int, int]:
         """
@@ -179,11 +218,25 @@ class OrionAEFrameDataset(BaseDataset):
         file_label = self.file_labels[file_index]
         file_serie = self.file_series[file_index]
 
-        # Load raw data for the frame
-        raw_data = self._load_data(file_path)[local_frame_index]
+        # Load raw data and events for the frame
+        raw_data, events_data = self._load_data(file_path)
+        
+        # Get the specific frame
+        frame_data = raw_data[local_frame_index]
+        
+        # Get events for this frame if available
+        if events_data is not None:
+            frame_events = events_data[local_frame_index]  # Shape: (3,)
+            sample_item['events'] = {
+                'positive_peak': int(frame_events[0]),
+                'mid_zero': int(frame_events[1]),
+                'negative_peak': int(frame_events[2])
+            }
+        else:
+            sample_item['events'] = None
 
         # Select only configured channels
-        selected_data = self._select_channels(raw_data)
+        selected_data = self._select_channels(frame_data)
 
         # Store raw data
         sample_item['raw'] = selected_data.T  # (channels, time_steps) from _select_channels

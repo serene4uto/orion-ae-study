@@ -20,11 +20,11 @@ train:
   
   # Loss function configuration (can be a list for multiple losses)
   criterion:
-    - name: "POM1bLoss"
-      weight: 1.0
-      params: null
-        # Optional: specify class weights if needed
-        # weight: [1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0]
+    # - name: "POM1bLoss"
+    #   weight: 1.0
+    #   params: null
+    #     # Optional: specify class weights if needed
+    #     # weight: [1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0]
     - name: "nn.CrossEntropyLoss"
       weight: 1.0
       params: null
