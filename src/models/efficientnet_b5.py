@@ -29,6 +29,7 @@ class EfficientNetB5Model(BaseModel):
         pretrained: bool = True,
         dropout: float = 0.5,
         fc_hidden_sizes: Optional[List[int]] = None,
+        backbone_freeze: bool = False,
     ):
         """
         Initialize EfficientNet-B5 model.
@@ -40,6 +41,7 @@ class EfficientNetB5Model(BaseModel):
             fc_hidden_sizes: List of hidden layer sizes for classifier head.
                            If None, uses [128] as default.
                            Example: [256, 128] for two hidden layers.
+            backbone_freeze: If True, freeze backbone parameters (default: False)
         """
         super().__init__()
         
@@ -52,6 +54,11 @@ class EfficientNetB5Model(BaseModel):
             self.backbone = efficientnet_b5(weights=weights)
         else:
             self.backbone = efficientnet_b5(weights=None)
+        
+        # Freeze backbone if requested
+        if backbone_freeze:
+            for param in self.backbone.parameters():
+                param.requires_grad = False
         
         # Get the number of features from the classifier
         # EfficientNet-B5 classifier has: dropout -> linear(2048, num_classes)

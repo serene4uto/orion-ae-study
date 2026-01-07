@@ -5,5 +5,5 @@ model:
     pretrained: true                   # Use pretrained ImageNet weights
     dropout: 0.5                       # Dropout rate for classifier head
     fc_hidden_sizes: [128]             # FC hidden layer sizes, e.g. [128] or [256, 128]
-    backbone_freeze: false             # Freeze backbone parameters (true/false)
+    backbone_freeze: true             # Freeze backbone parameters (true/false)
 
