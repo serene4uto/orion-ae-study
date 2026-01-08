@@ -1,0 +1,67 @@
+train:
+  run_dir: null
+  experiment_name: null
+  
+  # Device configuration
+  device: "cuda"
+  
+  # Super-convergence: 3-5 epochs with 1cycle scheduler (per paper recommendation)
+  num_epochs: 5
+  
+  # Batch size for stable gradients
+  batch_size: 16
+
+  num_workers: 4
+  pin_memory: true
+  
+  # POM1b Ordinal Loss (per paper: ~7% improvement over CrossEntropy)
+  criterion:
+    - name: "POM1bLoss"
+      weight: 1.0
+      params:
+  
+  optimizer:
+    name: "Adam"
+    lr: 0.001  # This becomes max_lr for OneCycleLR
+    params:
+      weight_decay: 0.0001
+      betas: [0.9, 0.999]
+      eps: 1e-8
+  
+  # 1cycle scheduler for super-convergence (per paper recommendation)
+  scheduler:
+    name: "OneCycleLR"
+    params:
+      max_lr: 0.001           # Peak learning rate
+      pct_start: 0.3          # 30% of training for warmup phase
+      anneal_strategy: "cos"  # Cosine annealing in decay phase
+      div_factor: 25          # initial_lr = max_lr / 25 = 0.00004
+      final_div_factor: 10000 # final_lr = max_lr / 10000 = 0.0000001
+      # total_steps: auto-calculated by trainer (epochs * batches_per_epoch)
+  
+  l1_reg: 0.0
+
+  # Reduced patience since super-convergence is fast
+  early_stopping:
+    patience: 3
+    min_delta: 0.001
+    monitor: "val/loss" 
+
+  checkpoint:
+    monitor: "val/loss"
+    save_best: true
+    save_every_n_epochs: 1  # Save every epoch since training is short
+
+  logging:
+    tensorboard:
+      enabled: true
+      log_interval: 10
+      log_graph: true
+    log_interval: 10
+    log_epoch_interval: 1
+  
+  # Gradient clipping for stability
+  max_grad_norm: 0.0 
+  
+  # Mixed precision for faster training
+  amp: true

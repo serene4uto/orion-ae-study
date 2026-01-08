@@ -1,0 +1,14 @@
+features:
+  - name: CWTScalogramTransform
+    params:
+      library: ssqueezepy
+      wavelet_type: gmw
+      wavelet_params:
+        gamma: 3
+        beta: 8
+      fs: 5000000
+      n_scales: 150
+      freq_min: 50000  # 50 kHz
+      freq_max: 2500000  # 2.5 MHz
+      target_size: [224, 224]
+      colormap: viridis

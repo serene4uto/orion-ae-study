@@ -1,0 +1,11 @@
+preprocess:
+  filters: 
+  - name: HighPassFilter
+    params:
+      cutoff: 100000
+      fs: 5.0e6
+      order: 5
+  norms: []
+  miscs:         
+  - name: HanningWindow
+    params: {}

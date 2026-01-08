@@ -11,3 +11,16 @@ python eval.py     --checkpoint runs/20260107_020952/checkpoints/best_model.pt  
 
 
 python train.py --train_config configs/train/train_example3.yaml --dataset_config configs/dataset/cwt_scalogram_A_e.yaml --model_config configs/model/efficientnet_b5.yaml --data_path data/processed/example_1_features_20251222_183540
+
+
+
+
+python scripts/build_feature_set.py --frame-path data/raw/segmented_cycles_positive_c1_l42373_c_A_B_C_D_20260107_205752 --dataset-config-path configs/dataset/example_1.yaml --preprocess-config-path configs/preprocess/preprocess_hanning_only.yaml --feature-config-path configs/feature/feature_cwt_scalogram_gmw.yaml --save-path data/processed
+
+
+python scripts/build_feature_set_optimized.py \
+    --frame-path data/raw/segmented_cycles_positive_c1_l42373_c_A_B_C_D_20260107_205752 \
+    --dataset-config-path configs/dataset/example_1.yaml \
+    --feature-config-path configs/feature/feature_cwt_scalogram_gmw.yaml \
+    --preprocess-config-path configs/preprocess/preprocess_hanning_only.yaml \
+    --workers 2

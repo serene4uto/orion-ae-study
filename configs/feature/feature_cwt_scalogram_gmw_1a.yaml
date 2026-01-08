@@ -12,3 +12,4 @@ features:
       # freq_max: null  # Remove or comment out
       target_size: [224, 224]
       colormap: viridis
+      l1_norm: false

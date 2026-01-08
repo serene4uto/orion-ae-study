@@ -190,6 +190,9 @@ def process_feature_cfg(feature_cfg: dict):
 def save_features_dataset(
     dataset: OrionAEFrameDataset,
     save_path: Path,
+    dataset_config: dict = None,
+    preprocess_cfg: dict = None,
+    feature_cfg: dict = None,
 ):
     """
     Extract features from dataset and save to processed directory.
@@ -252,6 +255,25 @@ def save_features_dataset(
     
     # Copy metadata
     shutil.copy(dataset.data_path / "metadata.csv", output_dir / "metadata.csv")
+    
+    # Save configs for reproducibility
+    if dataset_config or preprocess_cfg or feature_cfg:
+        config_dir = output_dir / "config"
+        config_dir.mkdir(exist_ok=True)
+        
+        if dataset_config:
+            with open(config_dir / "dataset_config.yaml", 'w') as f:
+                yaml.dump({'dataset': dataset_config}, f, default_flow_style=False, sort_keys=False)
+        
+        if preprocess_cfg:
+            with open(config_dir / "preprocess_config.yaml", 'w') as f:
+                yaml.dump({'preprocess': preprocess_cfg}, f, default_flow_style=False, sort_keys=False)
+        
+        if feature_cfg:
+            with open(config_dir / "feature_config.yaml", 'w') as f:
+                yaml.dump(feature_cfg, f, default_flow_style=False, sort_keys=False)
+        
+        print(f"  Configs saved to: {config_dir}")
     
     # Load and update dataset_info.json with selected channels
     if (dataset.data_path / "dataset_info.json").exists():
@@ -362,6 +384,9 @@ def main():
     output_dir = save_features_dataset(
         dataset=dataset,
         save_path=args.save_path,
+        dataset_config=dataset_config,
+        preprocess_cfg=preprocess_cfg,
+        feature_cfg=feature_cfg,
     )
     
     print(f"\n✓ Feature extraction complete!")
