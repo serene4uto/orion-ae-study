@@ -3,15 +3,17 @@
 dataset:
   name: "example_1"
   type: "OrionAEFrameDataset"
-  splits: 
-    train_val:
-      # series: ['B', 'C', 'D', 'E']
-      type: chunk-based # chunk-based or serie-based
-      train: [0,1,2,3,4,5,6,7]
-      val: [8,9]
-    test: ['F'] # always serie-based split
-  # channels: ["A", "B", "C", "D"] # define selectedchannels here based on channel names
-  channels: ["A", "B", "C"] # define selectedchannels here based on channel names
+  splits:
+    train:
+      'B': [1,2,3,4,5,6,7,8,9,10]
+      'C': [1,2,3,4,5,6,7,8,9,10]
+      'D': [1,2,3,4,5,6,7,8,9,10]
+      'E': [1,2,3,4,5,6,7,8,9,10]
+    val:
+      'F': [1,2,3,4,5,6,7,8,9,10]
+    test:
+      'F': [1,2,3,4,5,6,7,8,9,10]
+  channels: ["A", "B", "C"] # define selected channels here based on channel names
   labels: 
     # define labels here based on load values
     # the idea is that can create different set of labels with different load combinations
@@ -35,39 +37,6 @@ dataset:
     "lv4": [0.4]
     "lv5": [0.5]
     "lv6": [0.6]
-
-  # preprocess:
-  #   filters:
-  #     - type: HighPassFilter
-  #       params:
-  #         cutoff: 100
-  #         fs: 5.0e6  # 5000000
-  #         order: 5
-  #   norms:
-  #     - type: ZScoreNorm
-  #       params:
-  #         mean: [0.51982021, 1.78221031, 0.32854723]
-  #         std: [4.81500911, 6.92255416, 8.82353942]
-  #     # - type: SeriesZScoreNorm
-  #     #   params:
-  #     #     series_params:
-  #     #       'B':
-  #     #         mean: [0.58009147, 2.13962315, 0.12031674]
-  #     #         std: [4.78606225, 6.49078199, 7.51684796]
-  #     #       'C':
-  #     #         mean: [1.1293965, 2.04018865, 0.27358819]
-  #     #         std: [4.62223859, 7.79696241, 9.22351764]
-  #     #       'D':
-  #     #         mean: [0.22941354, 1.4716678, 0.6410115]
-  #     #         std: [4.81425054, 7.36753723, 9.13285726]
-  #     #       'E':
-  #     #         mean: [0.11833483, 1.12777588, 0.30956035]
-  #     #         std: [4.89143049, 6.43525229, 9.54307939]
-  #     #       'F':
-  #     #         mean: [0.53612407, 2.11247939, 0.30080982]
-  #     #         std: [4.88715638, 6.36863377, 8.54823905]
-
-  # features: []
 
   
   
