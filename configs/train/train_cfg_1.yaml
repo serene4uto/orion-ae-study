@@ -7,7 +7,7 @@ train:
   device: "cuda"
   
   # Number of training epochs
-  num_epochs: 5
+  num_epochs: 10
   
   # Batch size for training and validation
   batch_size: 16
@@ -44,7 +44,7 @@ train:
   scheduler:
     name: "StepLR"  # or "CosineAnnealingLR", "ReduceLROnPlateau", etc.
     params:
-      step_size: 30
+      step_size: 15
       gamma: 0.1
   
   # Optional: Regularization
@@ -52,7 +52,7 @@ train:
 
   # Optional: Early stopping
   early_stopping:
-    patience: 10
+    patience: 15
     min_delta: 0.001
     monitor: "val/loss" # or "val/acc" 
 
@@ -80,6 +80,6 @@ train:
   max_grad_norm: null # 1.0 
   
   # Optional: Enable Automatic Mixed Precision (AMP) for faster training
-  amp: true  # Set to true to enable AMP (requires CUDA)
+  amp: false  # Set to true to enable AMP (requires CUDA)
 
   

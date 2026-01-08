@@ -372,12 +372,6 @@ def main():
         experiment_dir=experiment_dir
     )
     
-    # Start training
-    LOGGER.info("Starting training...")
-    trainer.train()
-    
-    LOGGER.info("Training completed successfully!")
-    
     # Saving the configuration for reproducibility
     save_config_path = experiment_dir / "config"
     save_config(train_config, Path(save_config_path) / "train_config.yaml")
@@ -387,7 +381,18 @@ def main():
         save_config(preprocess_config, Path(save_config_path) / "preprocess_config.yaml")
     if feature_config_path and feature_config_path.exists():
         save_config(feature_config, Path(save_config_path) / "feature_config.yaml")
+    
+    # Save data name in a separate file
+    data_name_config = {'_data_name': data_path.name}
+    save_config(data_name_config, Path(save_config_path) / "data_name.yaml")
+    
     LOGGER.info(f"Config files saved to {save_config_path}")
+    
+    # Start training
+    LOGGER.info("Starting training...")
+    trainer.train()
+    
+    LOGGER.info("Training completed successfully!")
     
 
 if __name__ == "__main__":
