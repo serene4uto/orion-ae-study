@@ -15,3 +15,5 @@ __pycache__/
 /runs/
 /mlruns/
 *.db
+
+.cursor/
